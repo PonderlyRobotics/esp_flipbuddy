@@ -1,0 +1,52 @@
+# Host-only hooks. Not used on the ESP32.
+# Install once:  pre-commit install
+# Run all:       pre-commit run --all-files
+# Full release:  just release-check
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-json
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=9000"] # STLs / assembly PDF can be large; firmware .bin is gitignored
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: check-symlinks
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        language: system
+
+  - repo: local
+    hooks:
+      - id: micropython-check
+        name: MicroPython Syntax Check
+        entry: python3 -m py_compile
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: justfile-check
+        name: Justfile parses
+        entry: just --list
+        language: system
+        pass_filenames: false
+
+      - id: flipbuddy-safety
+        name: FlipBuddy secret / path safety
+        entry: python3 scripts/release_check.py
+        language: system
+        pass_filenames: true
+        files: '.*'

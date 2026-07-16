@@ -1,0 +1,46 @@
+FlipBuddy open DIY package
+Copyright (c) 2025-2026 Ponderly Robotics
+
+FlipBuddy software is under the MIT License (see LICENSE at the repo root).
+Hardware and CAD materials are under CC BY-NC-SA 4.0 (see LICENSE-HARDWARE).
+
+---------------------------------------------------------------------------
+Third-party components (not complete)
+---------------------------------------------------------------------------
+
+1) MicroPython
+
+   Prebuilt images named esp32_s3_flipbuddy_*.bin on GitHub Releases embed a
+   MicroPython runtime (v1.27 for the 0.1.0 image) and platform pieces from
+   the MicroPython ESP32 build. Those stay under their upstream licenses
+   (MicroPython is primarily MIT; see https://github.com/micropython/micropython
+   and ESP-IDF notices for the build).
+
+   FlipBuddy modules frozen into the image are MIT as in this repository.
+   The combined .bin is not "MIT only."
+
+2) MPU6050 / GY-521 (mpu6050.py)
+
+   Portions from Olivier Lenoir (MIT, Copyright (c) 2021-2022).
+   DMP-related data and register usage relate to InvenSense / community
+   ports (for example i2cdevlib / Jeff Rowberg lineage). See the file header
+   and those projects for detail.
+
+3) AP mode / captive portal ideas (ap_mode.py)
+
+   Patterns from https://github.com/metachris/micropython-captiveportal
+   (Chris Hager, MIT). See the file header.
+
+4) Host tooling
+
+   Optional PC tools (esptool, mpremote, ampy, ruff, pre-commit, gitleaks,
+   and so on) have their own licenses when you install them. They are not
+   part of the on-device firmware.
+
+---------------------------------------------------------------------------
+Redistributing frozen images
+---------------------------------------------------------------------------
+
+If you redistribute a FlipBuddy Release .bin, keep this NOTICE and the
+upstream licenses that apply to MicroPython and any other embedded pieces.
+Do not describe the whole binary as original FlipBuddy MIT-only code.

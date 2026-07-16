@@ -1,0 +1,24 @@
+# Optional host/dev environment for mise users.
+# Portable defaults only — no machine-specific paths.
+# End users flashing the cube do not need this file.
+
+[tools]
+python = "{{ get_env(name='PYTHON_VERSION', default='3.12') }}"
+ruff = "latest"
+
+[settings]
+python.uv_venv_auto = true
+not_found_auto_install = true
+experimental = true
+status.show_env = false
+lockfile = true
+
+[env]
+PROJECT_NAME = "{{ config_root | basename }}"
+# Local venv next to the repo (created by mise/uv as needed)
+_.python.venv = { path = "{{ config_root }}/.venv", create = true }
+UV_PROJECT_ENVIRONMENT = "{{ config_root }}/.venv"
+
+# Override on your machine if the serial device differs:
+#   export AMPY_PORT=/dev/ttyUSB0
+AMPY_PORT = "/dev/ttyACM0"

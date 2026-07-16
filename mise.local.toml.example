@@ -1,0 +1,20 @@
+# Example machine-local mise overrides for this repo.
+# Copy to mise.local.toml and edit (mise.local.toml is gitignored).
+#
+#   cp mise.local.toml.example mise.local.toml
+#
+# Use this for Ponderly commit identity when your global git is personal.
+# SSH keys / Host aliases: configure in ~/.ssh/config yourself.
+
+[env]
+# Commit author for this directory only (when mise env is active)
+GIT_AUTHOR_NAME = "Ponderly Robotics"
+GIT_AUTHOR_EMAIL = "YOUR_PONDERLY_NOREPLY@users.noreply.github.com"
+GIT_COMMITTER_NAME = "Ponderly Robotics"
+GIT_COMMITTER_EMAIL = "YOUR_PONDERLY_NOREPLY@users.noreply.github.com"
+
+# Optional serial port override
+# AMPY_PORT = "/dev/ttyUSB0"
+
+# Optional: force SSH key for this repo without a Host alias
+# GIT_SSH_COMMAND = "ssh -i ~/.ssh/personal/github_ponderly -o IdentitiesOnly=yes"

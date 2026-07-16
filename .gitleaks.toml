@@ -1,0 +1,29 @@
+# Gitleaks config for FlipBuddy public firmware repo.
+# Used by pre-commit (gitleaks hook) and `just release-check` when gitleaks is installed.
+
+title = "FlipBuddy gitleaks config"
+
+[extend]
+# Use gitleaks default rules, then apply allowlists below
+useDefault = true
+
+[allowlist]
+description = "Docs, tests, and known placeholders"
+paths = [
+  '''(^|/)test_fsm\.py$''',
+  '''(^|/)README\.md$''',
+  '''(^|/)scripts/release_check\.py$''',
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)LICENSE(-HARDWARE)?$''',
+]
+
+regexTarget = "match"
+regexes = [
+  # README / docs placeholders
+  '''YourWiFi''',
+  '''(?i)password["']?\s*:\s*["']secret["']''',
+  # Unit-test fakes
+  '''test123''',
+  '''tok456''',
+  '''dev123''',
+]

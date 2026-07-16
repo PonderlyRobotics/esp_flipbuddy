@@ -1,0 +1,47 @@
+# Host-side tooling only (PC). Not used on the ESP32 / MicroPython device.
+# End users flashing the cube do not need this file.
+#
+# Install host deps (optional):  uv sync   or   pip install -e .
+# Lint / format:                 just check | just fix | just fmt
+
+[project]
+name = "flipbuddy"
+version = "0.1.0"
+description = "OpenSource Time Tracking IoT Sensor"
+readme = "README.md"
+
+requires-python = ">=3.12.12"
+
+dependencies = [
+    "adafruit-ampy>=1.1.0",
+    "esptool>=5.1.0",
+    "mpremote>=1.24.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+line-length = 88
+
+fix = false
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E501", # Line too long
+]
+
+fixable = ["ALL"]
+unfixable = []
+
+# Host tests mock MicroPython before importing project modules.
+[tool.ruff.lint.per-file-ignores]
+"test_fsm.py" = ["E402"]

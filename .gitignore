@@ -1,0 +1,91 @@
+# --- Local architecture / assessment notes (not for public tree) ---
+ADR/
+adr/
+
+# --- Machine-local mise overrides (git identity, tokens, SSH hints) ---
+mise.local.toml
+.mise.local.toml
+
+
+# --- Secrets / device config (never commit) ---
+*.json
+!**/package.json
+credentials.json
+credentials*.json
+*.env
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+secrets.*
+
+# --- Firmware blobs: publish via GitHub Releases, never commit ---
+*.bin
+*.bin.sha256
+SHA256SUMS
+SHA256SUMS.asc
+
+# --- Local text dumps ---
+*.txt
+!requirements.txt
+!LICENSE*
+
+# --- Python / tooling ---
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+.uv/
+# Host-only lockfile (optional local uv sync; not part of the firmware package)
+uv.lock
+
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+
+# --- Packaging ---
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+*.manifest
+*.spec
+
+# --- Logs / editors / OS ---
+*.log
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Installer noise ---
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Sphinx / misc ---
+docs/_build/
+target/
