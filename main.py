@@ -647,7 +647,7 @@ class ActiveFSM(BaseFSM):
 
     async def start_ap_mode(self):
         dprint("Starting AP mode...")
-        ap_fsm = ApModeFSM(self.config, self.tracker)
+        ap_fsm = ApModeFSM(self.config, self.tracker, adc_vin=self.adc_vin)
         await ap_fsm.run()
         self.ap_mode = True
 

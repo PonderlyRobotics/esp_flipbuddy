@@ -19,15 +19,18 @@ import socket
 import machine
 import network
 import uasyncio as asyncio
+import utime as time
 from models import BaseFSM, Transition
 from network import AP_IF, WLAN
-from util import suppress
+from util import read_battery_voltage, suppress
 
 IS_UASYNCIO_V3 = hasattr(asyncio, "__version__") and asyncio.__version__ >= (3,)
 
 AP_SSID = "FlipBuddy"
 AP_IP = "10.20.30.40"
 AP_SUBNET = "255.255.255.0"
+# Match main.py: readings above this usually mean USB power on the VIN sense path.
+USB_VOLTAGE_THRESHOLD = 4.3
 
 
 class DNSQuery:
@@ -62,9 +65,10 @@ class DNSQuery:
 
 
 class ApModeFSM(BaseFSM):
-    def __init__(self, config, tracker):
+    def __init__(self, config, tracker, adc_vin=None):
         self.config = config
         self.tracker = tracker
+        self.adc_vin = adc_vin
         self.state = "START_AP"
         self.ap = None
         self.server = None
@@ -171,20 +175,93 @@ class ApModeFSM(BaseFSM):
 
         udps.close()
 
+    def _device_datetime_label(self):
+        """Human-readable device RTC time (UTC wall clock when NTP has run)."""
+        y, mo, d, h, mi, s, *_ = time.localtime()
+        return f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d} UTC"
+
+    def _battery_status(self):
+        """Live ADC sample for the AP landing top bar."""
+        if self.adc_vin is None:
+            return {
+                "label": "Battery: n/a",
+                "percent": None,
+                "voltage": None,
+                "usb": False,
+            }
+        try:
+            batt = read_battery_voltage(self.adc_vin)
+            voltage = batt["adjusted_voltage_v"]
+            percent = batt["battery_percentage"]
+            usb = voltage > USB_VOLTAGE_THRESHOLD
+            if usb:
+                label = f"USB · {voltage:.2f} V · {percent:.0f}%"
+            else:
+                label = f"{percent:.0f}% · {voltage:.2f} V"
+            return {
+                "label": label,
+                "percent": percent,
+                "voltage": voltage,
+                "usb": usb,
+            }
+        except Exception as e:
+            print(f"Battery read error: {e}")
+            return {
+                "label": "Battery: error",
+                "percent": None,
+                "voltage": None,
+                "usb": False,
+            }
+
     def generate_html(self):
-        html = """
+        dt_label = self._device_datetime_label()
+        batt = self._battery_status()
+        batt_label = batt["label"]
+        batt_class = "batt-usb" if batt["usb"] else "batt-ok"
+        if batt["percent"] is not None and not batt["usb"] and batt["percent"] < 20:
+            batt_class = "batt-low"
+
+        html = f"""
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>FlipBuddy Activity Setup</title>
             <style>
-                body { font-family: Arial, sans-serif; text-align: center; position: relative; }
-                .face { margin: 20px; padding: 20px; border: 1px solid #ccc; display: inline-block; }
-                .reset-btn { position: absolute; top: 10px; right: 10px; background: red; color: white; border: none; padding: 10px; cursor: pointer; font-size: 16px; }
+                body {{ font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; background: #f6f7f9; color: #1a1a1a; }}
+                .top-bar {{
+                    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+                    gap: 8px 12px; padding: 10px 14px; background: #111827; color: #f9fafb;
+                    font-size: 14px; box-sizing: border-box;
+                }}
+                .top-bar .brand {{ font-weight: bold; letter-spacing: 0.02em; }}
+                .top-bar .status {{ display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; flex: 1; justify-content: center; }}
+                .top-bar .stat {{ white-space: nowrap; }}
+                .top-bar .stat-label {{ opacity: 0.7; margin-right: 4px; font-size: 12px; text-transform: uppercase; }}
+                .batt-ok {{ color: #86efac; }}
+                .batt-low {{ color: #fca5a5; }}
+                .batt-usb {{ color: #93c5fd; }}
+                .reset-btn {{
+                    background: #dc2626; color: white; border: none; padding: 8px 12px;
+                    cursor: pointer; font-size: 14px; text-decoration: none; border-radius: 4px;
+                    white-space: nowrap;
+                }}
+                .content {{ padding: 16px 12px 32px; }}
+                .face {{ margin: 12px; padding: 20px; border: 1px solid #ccc; display: inline-block; border-radius: 8px; min-width: 120px; }}
+                pre {{ text-align: left; display: inline-block; max-width: 95%; overflow: auto; background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; }}
             </style>
         </head>
         <body>
-            <a href="/reset" class="reset-btn">&#x2716; Reset Device</a>
+            <div class="top-bar">
+                <span class="brand">FlipBuddy</span>
+                <div class="status">
+                    <span class="stat"><span class="stat-label">Time</span>{dt_label}</span>
+                    <span class="stat {batt_class}"><span class="stat-label">Battery</span>{batt_label}</span>
+                </div>
+                <a href="/reset" class="reset-btn">&#x2716; Reset Device</a>
+            </div>
+            <div class="content">
             <h1>FlipBuddy Cube Faces</h1>
         """
         faces = ["front", "back", "left", "right", "top", "bottom"]
@@ -205,6 +282,7 @@ class ApModeFSM(BaseFSM):
             html += f"{face}: {logs}\n"
         html += """
             </pre>
+            </div>
         </body>
         </html>
         """
