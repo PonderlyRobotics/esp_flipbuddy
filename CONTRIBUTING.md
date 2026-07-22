@@ -44,6 +44,8 @@ Or install the flash tools yourself and skip the project venv entirely.
 
 ### Useful `just` recipes
 
+After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same idea as `pull-nvs-state`).
+
 | Recipe | What it does |
 |--------|----------------|
 | `just put-main` | Upload `main.py` only |
@@ -54,14 +56,30 @@ Or install the flash tools yourself and skip the project venv entirely.
 | `just pull-nvs-state` | Dump config/tracker from NVS to local JSON |
 | `just flash-firmware` | Erase and flash a `.bin` |
 | `just shell` | Serial console |
-| `just test` | Host FSM tests |
-| `just check` / `just fix` / `just fmt` | Lint / format |
+| `just test` | Host tests (`tests/` + `test_fsm.py` via pytest) |
+| `just check` / `just fix` / `just fmt` | Lint / format (ruff) |
 | `just hooks` | Install pre-commit hooks |
 | `just release-check` | Pre-release safety audit |
 | `just release-assets <file.bin> [tag]` | Hash a frozen image for a GitHub Release |
 | `just release-publish <file.bin> <tag>` | Hash + `gh release create` (needs `gh`) |
 | `just clean-frozen` | Strip sources for frozen builds (advanced) |
 | `just upload-clean` | Clean then upload stripped modules |
+
+**Contributor loop (host, no hardware):**
+
+```bash
+uv sync
+just check
+just test
+# optional: just fix && just fmt
+```
+
+**Device deploy (DIY / full SoftAP stack on filesystem):**
+
+```bash
+just diy          # or: just upload && just put-credentials
+# frozen image path: just put-main (and put-credentials if needed)
+```
 
 Serial port defaults to `/dev/ttyACM0`. Override with `AMPY_PORT`.
 
@@ -118,7 +136,7 @@ We keep Super Mini images out of git and put them on Releases with checksums.
 
 4. Tag that commit and push the tag.
 
-5. Create the GitHub Release (`just release-publish …` or `gh release create`) and attach the `.bin` plus checksum files. [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md) is a fine template for the notes body.
+5. Create the GitHub Release (`just release-publish …` or `gh release create`) and attach the `.bin` plus checksum files. [docs/RELEASE_NOTES_v0.1.1.md](./docs/RELEASE_NOTES_v0.1.1.md) is a fine template for the notes body.
 
 6. If the README still names an old image, update the version string there.
 
@@ -135,25 +153,35 @@ just flash-firmware esp32_s3_flipbuddy_0.1.1.bin
 
 ```bash
 just test
-# or: python3 test_fsm.py
 ```
 
-These run on a normal PC with mocks. No hardware required.
+That runs:
+
+1. `pytest tests/` - SoftAP portal, credentials PIN, network helpers  
+2. `python test_fsm.py` - Boot / Active / Upload FSM suite (self-contained host runner)
+
+No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 
 ## Code map
 
 | Area | File |
 |------|------|
-| Orchestration / FSMs | `main.py` |
+| Orchestration / FSMs | `main.py` (early SoftAP gate at top; Boot / Active / Upload) |
+| SoftAP session (clean heap) | `ap_session.py` |
+| SoftAP captive portal | `ap_mode.py` (PIN unlock, Wi-Fi UI, LED test) |
 | Faces, tracker, config | `models.py` |
 | IMU / face math | `mpu6050.py` (leave the DMP blob and fmt guards alone) |
 | LEDs | `rgb.py` |
 | HTTP / token rotate | `http.py` |
-| Wi-Fi | `network_helper.py` |
-| Credentials / NVS | `credentials.py` |
+| Wi-Fi STA / SoftAP helpers | `network_helper.py` |
+| Credentials / NVS / SoftAP PIN | `credentials.py` |
 | Power diagram | `fsm.dot` |
+| SoftAP end-user steps / risks | [README SoftAP](./README.md#softap-maintenance-mode), [SECURITY SoftAP](./SECURITY.md#softap-captive-portal-http-pin-wi-fi) |
+| Host SoftAP / credential tests | `tests/` |
 
-Usual life cycle: Boot, a short sleep, then Active and Upload when waking from deep sleep. For small behavior changes, edit `main.py` on top of the public frozen image.
+SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes. (Private design notes may exist under `ADR/` locally; that directory is not published.)
+
+Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. USB face (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). For small behavior changes on a frozen image, prefer `just put-main`; for DIY full sources use `just diy` / `just upload`.
 
 Pins: search `main.py` for `NP_DATA_PIN` and the neighboring constants.
 

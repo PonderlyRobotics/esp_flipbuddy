@@ -1,6 +1,18 @@
 # Changelog
 
-Versions follow `pyproject.toml` and the GitHub Release tags. Firmware and enclosure for this release are both **0.1.0**.
+Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
+
+## 0.1.1 (2026-07-22)
+
+SoftAP maintenance mode and related host tooling:
+
+- SoftAP captive portal on USB‑C face: status (UTC time, battery), PIN unlock, Wi‑Fi profiles, change PIN, LED self‑test, ungated device reset
+- Early SoftAP gate + `ap_session` clean‑heap path (soft_reset handoff); lazy STA / SoftAP radio helpers
+- Host tests under `tests/` (PIN, Wi‑Fi NVS, portal HTML helpers, handoff marks); CI runs `pytest tests/`
+- README SoftAP builder steps, clock/Wi‑Fi FAQs; SECURITY SoftAP risks (cleartext HTTP, multi‑client unlock, factory PIN)
+- Factory setup PIN = last 6 alphanumeric of `device_id`; optional custom PIN in NVS
+
+Fast track: flash `esp32_s3_flipbuddy_0.1.1.bin` (when published on GitHub Releases), then place `main.py` + credentials. DIY / `just diy` still works with stock MicroPython + full sources.
 
 ## 0.1.0 (2026-07-16)
 

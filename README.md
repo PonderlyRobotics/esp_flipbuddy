@@ -3,14 +3,14 @@
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](./.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Hardware: CC BY--NC--SA 4.0](https://img.shields.io/badge/Hardware-CC%20BY--NC--SA%204.0-lightgrey.svg)](./LICENSE-HARDWARE)
-[![Release](https://img.shields.io/badge/release-v0.1.0-blue.svg)](./docs/CHANGELOG.md)
+[![Release](https://img.shields.io/badge/release-v0.1.1-blue.svg)](./docs/CHANGELOG.md)
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.27-2B2728.svg)](https://micropython.org/)
 
 I kept forgetting to start the timer on my phone. FlipBuddy is my fix for that: a printed cube on the desk. You flip a face up, that activity is on. The LEDs show the color you picked in the free app at [flipbuddy.app](https://flipbuddy.app). No app hunt every time you switch tasks.
 
 I thought it would take a weekend. It took months. That’s fine. The result is still a simple cube: flip a face, log the time, check the history later in the app if you want.
 
-This repository is the open DIY build. Firmware is **0.1.0**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
+This repository is the open DIY build. Firmware is **0.1.1**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
 <p align="center">
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
@@ -20,8 +20,8 @@ If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assem
 
 | | |
 |--|--|
-| Firmware image | `esp32_s3_flipbuddy_0.1.0.bin` on GitHub Releases (MicroPython 1.27; helpers frozen in; not in git) |
-| Enclosure | [stl/](./stl/) v0.1.0 |
+| Firmware image | `esp32_s3_flipbuddy_0.1.1.bin` on GitHub Releases (MicroPython 1.27; helpers frozen in; not in git) |
+| Enclosure | [stl/](./stl/) |
 | Assembly | [FlipBuddy Assembly guide.pdf](./FlipBuddy%20Assembly%20guide.pdf) |
 | Software license | [MIT](./LICENSE) |
 | Hardware license | [CC BY-NC-SA 4.0](./LICENSE-HARDWARE) |
@@ -32,10 +32,11 @@ The design is for minutes and hours, not a stopwatch. It prefers boards you can 
 
 - [Features in short](#features-in-short)
 - [Day to day](#day-to-day)
+- [SoftAP maintenance mode](#softap-maintenance-mode)
 - [Battery (rough)](#battery-rough)
 - [Getting started](#getting-started)
   - [Serial port and board](#serial-port-and-board-justfile)
-  - [Fast track (v0.1.0)](#fast-track-v010)
+  - [Fast track (v0.1.1)](#fast-track-v011)
   - [DIY path](#diy-path)
 - [Assembly, printing, and parts](#assembly-printing-and-parts)
 - [Web app](#web-app)
@@ -62,7 +63,64 @@ Wi-Fi is used for uploads, sometimes on the stop face, and when USB is plugged i
 
 If Wi-Fi is down but credentials are already installed, the cube still boots and can log with defaults. Full face colors and history still need flipbuddy.app for normal use.
 
-USB-C face up opens a local AP that can show data not yet uploaded. Blinking all leds red often means bad orientation or low battery. AI in the app can be turned off.
+USB-C face up can open **SoftAP maintenance mode** (local captive portal — see below). Blinking all leds red often means bad orientation or low battery. AI in the app can be turned off.
+
+## SoftAP maintenance mode
+
+When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
+
+Full SoftAP needs the portal modules on the device: the **0.1.1** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (open AP, cleartext HTTP, PIN): [SECURITY.md](./SECURITY.md).
+
+| | |
+|--|--|
+| Join Wi‑Fi | Open network **`FlipBuddy`** (no AP password) |
+| Portal URL | [http://10.20.30.40/](http://10.20.30.40/) (captive portal usually opens this) |
+| Session length | About **5 minutes**, then SoftAP stops and the cube deep‑sleeps |
+| Transport | **HTTP only** (cleartext) |
+
+### Builder steps
+
+1. Put the **USB‑C port face** up. Wait until the phone sees open Wi‑Fi **`FlipBuddy`** (shake to wake if the cube slept).
+2. Join **`FlipBuddy`**. If no captive browser popup, open **http://10.20.30.40/**.
+3. Unlock with the **setup PIN** (below) if you need to change Wi‑Fi or PIN.
+4. Save home SSID/password if needed. Keep **only one phone** on `FlipBuddy` while settings are unlocked ([why](./SECURITY.md#softap-captive-portal-http-pin-wi-fi)).
+5. **Exit:**
+   - Tap **Reset device** on the portal (preferred after clock issues), **or** wait for SoftAP to end (~5 min).
+   - Flip to a **non‑cutout** face (activity or stop — not either shell cutout).
+   - On the phone, leave `FlipBuddy` and rejoin your **home** Wi‑Fi.
+6. SoftAP again later: **leave the USB face first** (cooldown after a session), then put USB face up again.
+
+**Timeout vs Reset:** SoftAP timeout turns SoftAP off, deepsleeps briefly, then normal wake (may use home Wi‑Fi / NTP if already configured). **Reset device** (or power‑cycle) runs a full boot with forced Wi‑Fi + NTP — use that when the clock is wrong.
+
+### Default unlock PIN
+
+Settings that **write** to the cube need a **setup PIN** unlock for that SoftAP session:
+
+- **Factory default:** last **6** alphanumeric characters of your **`device_id`**, uppercased (ignore hyphens/punctuation).  
+  Example: `device_id` ending in `…ABCDEF123456` → default PIN **`123456`**.
+- **Custom PIN:** after unlock, set 4–16 letters/numbers on the portal (stored in NVS); then the factory rule no longer applies.
+- Wrong PIN is rate‑limited (**8** tries); then unlock locks until reboot. Portal **Reset device** still works and reboots the cube.
+- Unlock idles out after about 5 minutes of no settings use — use **Lock settings** when finished.
+
+You can find `device_id` in the downloaded `credentials.json` or in the flipbuddy.app device page. The cube does not display the PIN.
+
+### What the captive portal shows
+
+**Always available (no PIN):**
+
+- Device **UTC time** and **battery** (percent / voltage; USB‑aware) on the top bar
+- Face map / activity colors as stored on the cube
+- Local activity records not yet uploaded (when any)
+- **Reset device** (not PIN‑protected — physical USB‑face access is assumed)
+
+**After PIN unlock:**
+
+- Add or update **Wi‑Fi** profiles (SSID, password, hidden flag) in NVS
+- **Change unlock PIN**
+- **LED self‑test**
+- **Lock** the settings section again
+
+`device_token` is never shown or edited on SoftAP. To replace API credentials, re‑upload `credentials.json` over USB (`just put-credentials` / `just fast-track`).
 
 ### Which face is which?
 
@@ -90,7 +148,7 @@ Build and wire the cube first ([assembly section](#assembly-printing--bom) and t
 
 | Path | Use when | What you put on the device |
 |------|----------|----------------------------|
-| [Fast track](#fast-track-v010) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
+| [Fast track](#fast-track-v011) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
 | [DIY path](#diy-path) | Other boards, or you want every `.py` on the filesystem | Stock MicroPython + all sources + credentials |
 
 ### Serial port and board (`justfile`)
@@ -115,13 +173,13 @@ just env
 
 The Release fast-track image is ESP32-S3 only. Other chips need the DIY path. Commands below use `/dev/ttyACM0` and `esp32s3`; change them if you are not using `just`.
 
-### Fast track (v0.1.0)
+### Fast track (v0.1.1)
 
-Helpers are frozen into the image. You only place `main.py` and `credentials.json` on the filesystem so you can tweak the entrypoint without rebuilding MicroPython.
+Helpers (including SoftAP portal modules) are frozen into the image. You only place `main.py` and `credentials.json` on the filesystem so you can tweak the entrypoint without rebuilding MicroPython.
 
 | | |
 |--|--|
-| Image | `esp32_s3_flipbuddy_0.1.0.bin` from GitHub **Releases** |
+| Image | `esp32_s3_flipbuddy_0.1.1.bin` from GitHub **Releases** |
 | Checksum | Matching `.bin.sha256` or `SHA256SUMS` on the same release |
 | Runtime | MicroPython 1.27 |
 | Board | ESP32-S3 Super Mini class with battery charger |
@@ -130,19 +188,19 @@ Helpers are frozen into the image. You only place `main.py` and `credentials.jso
 
 Use this README for flashing. The assembly PDF is for mechanics; if it only mentions stock MicroPython, prefer the frozen Release image for Super Mini.
 
-On GitHub: **Releases** → tag **v0.1.0** (or latest 0.1.x). Download the `.bin` and checksum file.
+On GitHub: **Releases** → tag **v0.1.1** (or latest 0.1.x). Download the `.bin` and checksum file.
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.1.0.bin.sha256
+sha256sum -c esp32_s3_flipbuddy_0.1.1.bin.sha256
 
 esptool --chip esp32s3 --port /dev/ttyACM0 erase-flash
-esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.0.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.1.bin
 ```
 
 Or, with the file in the repo directory:
 
 ```bash
-just flash-firmware esp32_s3_flipbuddy_0.1.0.bin
+just flash-firmware esp32_s3_flipbuddy_0.1.1.bin
 ```
 
 #### 2. Credentials
@@ -231,7 +289,7 @@ The PDF **Bill of Materials** and **Parts to Print** sections are the shopping a
 
 ### STLs (`stl/`)
 
-Enclosure **v0.1.0**, same pinout as firmware 0.1.0:
+Shell parts for the Super Mini pinout below (filenames include a design revision tag):
 
 | File | Role |
 |------|------|
@@ -307,7 +365,20 @@ The device token is valid for up to **60 days** for security (for example if a c
 No activities are assigned on the device yet. Map faces in the free [dashboard](https://flipbuddy.app), make sure Wi‑Fi works on first sync, then shake again. Until that config is applied, the cube only shows the empty “no faces” indicator.
 
 **I flashed the frozen image but the cube never joins my Wi‑Fi.**  
-Confirm `credentials.json` includes a working `wifi` entry (`ssid` / `password`), upload it with `just put-credentials` or `just fast-track`, and that the SSID is visible (the firmware scans before connecting; use `"hidden": true` for non-broadcast networks). After flash, credentials must be re-uploaded — erase/flash clears the filesystem. Check serial with `just shell` (115200) for connect / “no credentials” messages.
+Confirm `credentials.json` includes a working `wifi` entry (`ssid` / `password`), upload it with `just put-credentials` or `just fast-track`, and that the SSID is visible (the firmware scans before connecting; use `"hidden": true` for non-broadcast networks). After flash, credentials must be re-uploaded — erase/flash clears the filesystem. Check serial with `just shell` (115200) for connect / “no credentials” messages. You can also set or fix Wi‑Fi from the [SoftAP captive portal](#softap-maintenance-mode) after PIN unlock.
+
+**SoftAP / `FlipBuddy` Wi‑Fi does not show up.**  
+Shake or wake the cube, put the **USB‑C port face** up, and wait a few seconds. After a SoftAP session, the cube uses a **cooldown** while still on that face — flip to another face, then USB face up again. Confirm SoftAP modules are on the device (DIY/`just diy` or a frozen image that includes the SoftAP stack). Low battery or a failed SoftAP bring‑up falls back to normal boot; serial (`just shell`) shows `ap_session` / SoftAP messages if you have a cable.
+
+**I saved Wi‑Fi on SoftAP but the cube is still offline.**  
+On the phone, leave the **`FlipBuddy`** network and rejoin **home** Wi‑Fi. Flip the cube off the USB face (or tap **Reset device**). Confirm the SSID/password and, for hidden networks, the Hidden checkbox. Profile name defaults to `default` on the portal (getting‑started examples often use `home`) — either is fine; the firmware tries configured profiles.
+
+**Recorded times are wrong, or the clock looks fully out of sync.**  
+1. Home Wi‑Fi must work first (or fix it via SoftAP). SoftAP top bar cannot prove NTP until the cube has joined home Wi‑Fi on a normal boot.  
+2. SoftAP → check the top bar **UTC** time (not your local timezone; the dashboard may show local time).  
+3. If **UTC** is wrong and Wi‑Fi works: tap **Reset device**, place the cube on an **activity or stop face (not either cutout)**. Full boot forces **NTP** over home Wi‑Fi. SoftAP **timeout alone** is not the same as that initial boot path.  
+4. After a good sync, new sessions get correct timestamps. Old records logged while the RTC was wrong stay wrong — edit them in the [web dashboard](https://flipbuddy.app) if needed.  
+5. If UTC looks right but the app “looks wrong,” check timezone/display on the dashboard before assuming the cube clock failed.
 
 ## Bugs
 
@@ -338,5 +409,5 @@ If you want to use the enclosure designs commercially, please ask first. The non
 - [docs/media/](./docs/media/)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [SECURITY.md](./SECURITY.md)
-- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.0.md](./docs/RELEASE_NOTES_v0.1.0.md)
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.1.md](./docs/RELEASE_NOTES_v0.1.1.md)
 - [LICENSE](./LICENSE), [LICENSE-HARDWARE](./LICENSE-HARDWARE)

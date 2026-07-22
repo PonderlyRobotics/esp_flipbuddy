@@ -2,7 +2,18 @@ import utime as time
 
 
 class suppress:
-    """Minimal stand-in for contextlib.suppress (not in stock MicroPython)."""
+    """Minimal stand-in for contextlib.suppress (not in stock MicroPython).
+
+    Idiomatic best-effort helper for non-critical side effects (teardown,
+    optional HAL, radio cleanup, socket close after an error). Prefer this
+    over bare ``except: pass`` when a secondary action must not abort the
+    real control flow (boot, FSM, sleep, SoftAP handoff).
+
+    Trade-off: quieter failures vs. higher survivability on constrained
+    ESP32/MicroPython. Do **not** use on critical paths where the error
+    should surface (connect, save credentials, portal bring-up). Prefer
+    the narrowest exception types that match the failure mode.
+    """
 
     def __init__(self, *exceptions):
         self.exceptions = exceptions
