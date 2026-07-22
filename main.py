@@ -1,3 +1,64 @@
+# SoftAP early gate — MUST stay before heavy imports.
+# After machine.soft_reset() the heap is clean; we bring SoftAP up here (no boot.py).
+# RTC marks: FBAP1 = run SoftAP on this boot; APDON = already tried this USB face.
+_AP_BOOT_MARK = b"FBAP1"
+_AP_DONE_MARK = b"APDON"
+SOFTAP_CAPTIVE_PORTAL_ENABLED = True
+
+
+def _early_softap_gate():
+    """If ActiveFSM requested SoftAP via soft_reset, run portal before loading main stack."""
+    try:
+        from machine import RTC, reset_cause
+    except Exception:
+        return
+    try:
+        from machine import SOFT_RESET
+    except ImportError:
+        SOFT_RESET = 5  # MicroPython ESP32
+    try:
+        rtc = RTC()
+        mem = rtc.memory()
+    except Exception:
+        return
+    if not mem or len(mem) < 5 or mem[:5] != _AP_BOOT_MARK:
+        return
+    # Stale FBAP1 after power-on/hard reset must not steal BootFSM (WiFi/NTP/config).
+    try:
+        cause = reset_cause()
+    except Exception:
+        cause = -1
+    if cause != SOFT_RESET:
+        try:
+            rtc.memory(b"")
+        except Exception:
+            pass
+        return
+    try:
+        rtc.memory(_AP_DONE_MARK)
+    except Exception:
+        pass
+    try:
+        import gc
+
+        gc.collect()
+        import ap_session
+
+        # Success: portal then deepsleep (does not return).
+        # Failure: returns so heavy imports + BootFSM/ActiveFSM still run.
+        ap_session.run()
+        gc.collect()
+    except Exception as e:
+        try:
+            print("early SoftAP gate:", e)
+        except Exception:
+            pass
+
+
+_early_softap_gate()
+
+# --- normal firmware (heavy imports only after SoftAP gate) ---
+# E402 ignored for this file in pyproject.toml (gate before models/MPU/http).
 from http import (
     async_post_request,
     async_rotate_device_token,
@@ -9,7 +70,6 @@ import mip
 import neopixel
 import uasyncio as asyncio
 import utime as time
-from ap_mode import ApModeFSM
 from credentials import load_credentials
 from machine import (
     ADC,
@@ -27,11 +87,15 @@ from machine import (
 from micropython import const
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
 from mpu6050 import cube_face_upward, sensor_init
-from network import AP_IF, WLAN
-from network_helper import async_do_connect, sta_if
+from network_helper import (
+    async_do_connect,
+    release_sta,
+    release_wifi_radios,
+    stop_softap,
+)
 import network_helper
 from ntptime import settime as ntp_settime
-from util import read_battery_voltage, rgb_self_test, str_to_epoch, suppress
+from util import read_battery_voltage, rgb_self_test, str_to_epoch, suppress, time_iso
 
 # 240Mhz Note: Going lower cause led flicker due to software based async execution
 freq(240000000)
@@ -93,11 +157,11 @@ if not CREDENTIALS_OK:
     print("  1. Download credentials.json from flipbuddy.app")
     print('  2. Add Wi-Fi under wifi.<name>: {"ssid": "...", "password": "..."}')
     print('     Example: "wifi": {"home": {"ssid": "MyNet", "password": "secret"}}')
-    print("     Hidden SSID: set \"hidden\": true on that entry")
+    print('     Hidden SSID: set "hidden": true on that entry')
     print("  3. just put-credentials   (or just fast-track)")
     print("  4. Power cycle (or soft-reboot)")
     print("=" * 48)
-    print("Staying at REPL — app not started.")
+    print("Staying at REPL - app not started.")
     TOKEN = ""
     HEADERS = {}
     API_BASE = "https://api.flipbuddy.app/v1/api/"
@@ -151,6 +215,10 @@ def retrieve_last_backoff(default_sleep_time):
     """Retrieve the last backoff state from RTC memory."""
     backoff_state = rtc_mem.memory()
     if backoff_state:
+        # Ignore AP markers and other non-backoff payloads
+        prefix = backoff_state[:5]
+        if prefix in (_AP_BOOT_MARK, _AP_DONE_MARK):
+            return 0, default_sleep_time
         try:
             backoff_counter, prev_sleep_time = map(
                 int, backoff_state.decode().split(",")
@@ -162,23 +230,77 @@ def retrieve_last_backoff(default_sleep_time):
     return backoff_counter, prev_sleep_time
 
 
+def is_ap_cooldown():
+    """True if we already attempted AP for this USB-face placement."""
+    try:
+        mem = rtc_mem.memory()
+        return bool(mem and mem[:5] == _AP_DONE_MARK)
+    except Exception:
+        return False
+
+
+def set_ap_cooldown():
+    """Block another AP clean-reboot until USB face is left."""
+    try:
+        rtc_mem.memory(_AP_DONE_MARK)
+    except Exception:
+        pass
+
+
+def clear_ap_cooldown():
+    """Allow AP again after leaving back_cutout."""
+    try:
+        mem = rtc_mem.memory()
+        if mem and mem[:5] in (_AP_DONE_MARK, _AP_BOOT_MARK):
+            reset_backoff(DEFAULT_SLEEP_TIME)
+    except Exception:
+        pass
+
+
+def request_ap_soft_reset_handoff():
+    """Soft-reset into early SoftAP gate (clean heap). Does not return on success."""
+    rtc_mem.memory(_AP_BOOT_MARK)
+    dprint("AP mode: soft_reset -> early SoftAP gate...")
+
+    global scheduler_wd
+    try:
+        if "scheduler_wd" in globals() and scheduler_wd is not None:
+            scheduler_wd.deinit()
+            scheduler_wd = None
+    except Exception:
+        pass
+
+    release_sta()
+    stop_softap()
+    time.sleep_ms(100)
+
+    try:
+        from machine import soft_reset
+
+        soft_reset()
+    except (ImportError, AttributeError):
+        dprint("AP mode: soft_reset unavailable, machine.reset() fallback")
+        time.sleep_ms(50)
+        reset()
+
+
 def fibonacci(n, default_sleep_time, max_sleep_time):
     """Calculate the nth Fibonacci number, capped at max_sleep_time."""
     a, b = default_sleep_time, default_sleep_time
     for _ in range(n):
         a, b = b, a + b
-        if b > max_sleep_time:
+        if b >= max_sleep_time:
             return max_sleep_time
     return b
 
 
 def apply_backoff(default_sleep_time, max_sleep_time):
-    """Apply exponential backoff using Fibonacci sequence."""
+    """Apply Fibonacci backoff and store state in RTC memory."""
     backoff_counter, _ = retrieve_last_backoff(default_sleep_time)
     backoff_counter += 1
-    new_sleep_time = fibonacci(backoff_counter, default_sleep_time, max_sleep_time)
-    rtc_mem.memory(f"{backoff_counter},{new_sleep_time}".encode())
-    return new_sleep_time
+    sleep_time = fibonacci(backoff_counter, default_sleep_time, max_sleep_time)
+    rtc_mem.memory(f"{backoff_counter},{sleep_time}".encode())
+    return sleep_time
 
 
 def reset_backoff(default_sleep_time):
@@ -189,20 +311,23 @@ def reset_backoff(default_sleep_time):
 async def wait_for_connection(retry_interval=1.0, max_attempts=4):
     """Asynchronously wait for WiFi connection with retries.
 
-    If a scan shows no configured SSID (or no credentials), do not retry — the
-    radio already did useful work and further 10s connect loops would only drain battery.
+    If credentials are missing, do not retry. Empty scan still attempts connect
+    (radio may not be ready yet); only explicit no_creds aborts early.
     """
     attempts = 0
     try:
         while attempts < max_attempts:
+            wdt_feed()
             if await async_do_connect(timeout=10):
                 return True
-            # no_ssid / no_creds: scan already answered; more attempts won't help this wake
-            if network_helper.last_connect_status in ("no_ssid", "no_creds"):
+            # no_creds: nothing to try. no_ssid after empty scan is no longer terminal
+            # (network_helper falls back to trying configured SSIDs).
+            if network_helper.last_connect_status == "no_creds":
                 dprint(f"WiFi give up early ({network_helper.last_connect_status})")
                 return False
             attempts += 1
             dprint(f"Connection retry {attempts}/{max_attempts}")
+            wdt_feed()
             await asyncio.sleep(retry_interval)
         return False
     except Exception:
@@ -211,11 +336,24 @@ async def wait_for_connection(retry_interval=1.0, max_attempts=4):
 
 
 async def disconnect_wifi():
-    """Disconnect WiFi and deactivate interface."""
-    if sta_if.isconnected():
-        sta_if.disconnect()
-        sta_if.active(False)
-        await asyncio.sleep(0.1)
+    """Disconnect station Wi-Fi without constructing interfaces unnecessarily."""
+    try:
+        release_sta()
+        stop_softap()
+    except OSError as e:
+        dprint("disconnect_wifi:", e)
+    await asyncio.sleep(0.1)
+
+
+async def sync_time_if_possible():
+    """NTP when online. Boot does this once; upload path re-syncs so RTC does not drift."""
+    try:
+        ntp_settime()
+        dprint("NTP synced", time_iso(time.localtime()))
+        return True
+    except Exception as e:
+        dprint("NTP failed:", e)
+        return False
 
 
 async def prepare_for_deep_sleep(
@@ -328,7 +466,7 @@ async def ota_weekly_check(tracker_obj):
 
 
 # ------------------------------------------
-# -- BootFSM - first boot & wake handling --
+# -- BootFSM - first boot / cold start -------
 # ------------------------------------------
 class BootFSM(BaseFSM):
     def __init__(self, config, tracker, np_obj=None, adc_vin=None, np_vcc=None):
@@ -391,6 +529,7 @@ class BootFSM(BaseFSM):
 
     def enter_sensor_init(self):
         dprint("Initializing sensor and uploading DMP firmware...")
+        wdt_feed()
         s = sensor_init(
             enable_mpu=True,
             sda_pin=SDA_PIN,
@@ -398,6 +537,7 @@ class BootFSM(BaseFSM):
             intruppt_pin=INTERRUPT_PIN,
         )
         s.upload_dmp_firmware()
+        wdt_feed()
         self.config.running["calibration"]["mean"] = s.mean
         self.config.running["calibration"]["stddev"] = s.stddev
         self.config.apply(self.config.running)
@@ -405,11 +545,12 @@ class BootFSM(BaseFSM):
 
     async def connect_wifi(self):
         dprint("Connecting to WiFi...")
+        wdt_feed()
         if await wait_for_connection():
             self.is_connected = True
         else:
             # Offline-first: no reboot loop — continue with default faces / NVS state.
-            dprint("WiFi unavailable — continuing offline (default faces)")
+            dprint("WiFi unavailable - continuing offline (default faces)")
             self.is_connected = False
 
     async def boot_offline(self):
@@ -430,10 +571,7 @@ class BootFSM(BaseFSM):
 
     async def sync_ntp(self):
         dprint("Syncing NTP...")
-        try:
-            ntp_settime()
-        except Exception as e:
-            dprint("NTP failed (continuing):", e)
+        await sync_time_if_possible()
         wdt_feed()
         if self.np_vcc:
             self.np_vcc.on()
@@ -442,7 +580,9 @@ class BootFSM(BaseFSM):
 
     async def fetch_config(self):
         dprint("Fetching remote config...")
+        wdt_feed()
         await asyncio.sleep(2)
+        wdt_feed()
         self.remote_config = await get_remote_config()
         if self.remote_config:
             # Only apply + save if the meaningful settings actually changed.
@@ -472,7 +612,7 @@ class BootFSM(BaseFSM):
                 self.tracker.apply(self.tracker.running)
                 self.tracker.save()
         else:
-            dprint("No remote config — keeping local/default face map")
+            dprint("No remote config - keeping local/default face map")
 
     async def disconnect(self):
         dprint("Disconnecting WiFi...")
@@ -523,18 +663,23 @@ class ActiveFSM(BaseFSM):
             "FACE_CHECKED": [
                 Transition(
                     "AP_MODE",
-                    lambda: self.config.running["settings"].get(
-                        "ap_mode_enabled", False
-                    )
-                    and self.face_obj
-                    and self.face_obj.orientation == "back_cutout",
+                    lambda: (
+                        SOFTAP_CAPTIVE_PORTAL_ENABLED
+                        and self.config.running["settings"].get(
+                            "ap_mode_enabled", False
+                        )
+                        and self.face_obj
+                        and self.face_obj.orientation == "back_cutout"
+                        and not is_ap_cooldown()
+                    ),
                     lambda: self.start_ap_mode(),
                 ),
                 Transition("STOP_FACE_CHECK", lambda: True, lambda: None),
             ],
+            # soft_reset does not return; if it fails, still evaluate upload (USB often present).
             "AP_MODE": [
                 Transition(
-                    "DEEP_SLEEP",
+                    "UPLOAD_NEEDED",
                     lambda: True,
                     lambda: self.handle_ap_mode(),
                 ),
@@ -616,6 +761,9 @@ class ActiveFSM(BaseFSM):
         face_name = cube_face_upward(s)
         dprint(f"ActiveFSM → face: {face_name}")
         self.face_obj = getattr(self.tracker, face_name, None)
+        # Leaving USB face clears AP one-shot cooldown so next USB placement works
+        if not self.face_obj or self.face_obj.orientation != "back_cutout":
+            clear_ap_cooldown()
         if self.face_obj is None:
             dprint("No such face/activity_name")
         else:
@@ -646,18 +794,21 @@ class ActiveFSM(BaseFSM):
         s.enable_low_power_dmp_motion_detection()
 
     async def start_ap_mode(self):
-        dprint("Starting AP mode...")
-        ap_fsm = ApModeFSM(self.config, self.tracker, adc_vin=self.adc_vin)
-        await ap_fsm.run()
+        """USB face: soft_reset into early SoftAP gate (does not return on success)."""
+        dprint("AP mode: handoff via soft_reset...")
+        with suppress(Exception):
+            if self.face_obj and hasattr(self.face_obj, "led"):
+                await self.face_obj.led.inactive()
+        with suppress(Exception):
+            self.np_vcc.off()
         self.ap_mode = True
+        request_ap_soft_reset_handoff()
 
     async def handle_ap_mode(self):
-        dprint("Running AP mode for 5 minutes...")
-        # Loop 300 times (5 minutes), feeding watchdog each second to prevent reset
-        for _ in range(300):
-            wdt_feed()
-            await asyncio.sleep(1)
+        # Reached only if soft_reset failed; still try upload (USB power likely).
+        dprint("AP handoff did not restart; evaluate upload then sleep")
         self.sleep_ms = DEFAULT_SLEEP_TIME * 1000
+        await self.decide_upload()
 
     async def start_tracking(self):
         wdt_feed()
@@ -728,8 +879,16 @@ class ActiveFSM(BaseFSM):
             or wake_reason() == PIN_WAKE
         )
         self.need_upload = need_upload
-        # if not self.need_upload:
-        #     self.sleep_ms = self.sleep_ms
+        dprint(
+            "need_upload=",
+            need_upload,
+            "usb=",
+            usb_connected,
+            "has_log=",
+            has_log,
+            "v=",
+            batt.get("adjusted_voltage_v"),
+        )
 
     async def run(self):
         await self.run_fsm()
@@ -786,7 +945,7 @@ class UploadFSM(BaseFSM):
                 Transition(
                     "DISCONNECT", lambda: self.is_connected, lambda: self.post_upload()
                 ),
-                # Offline / Wi‑Fi failed: still deep-sleep, keep local tracking_log
+                # Offline / WiFi failed: still deep-sleep, keep local tracking_log
                 Transition("DISCONNECT", lambda: True, lambda: self.skip_upload()),
             ],
             "DISCONNECT": [
@@ -800,11 +959,15 @@ class UploadFSM(BaseFSM):
     async def do_upload(self):
         dprint("Uploading tracking log...")
         wdt_feed()
+        # SoftAP must be off before STA; wait_for_connection -> _prepare_sta does that
         if await wait_for_connection():
             self.is_connected = True
+            # Deep-sleep wakes skip BootFSM NTP; refresh clock before upload
+            await sync_time_if_possible()
             batt_reading = read_battery_voltage(self.adc_vin)
             batt_reading.update(self.config.running["device"])
             await asyncio.sleep(2)
+            wdt_feed()
             remote_config = await get_remote_config()
             if remote_config:
                 # Guard: only persist if settings hash actually changed (saves NVS writes).
@@ -836,7 +999,7 @@ class UploadFSM(BaseFSM):
             self.tracker.running["config_hash"] = self.config.hash_digest()
             self.tracker.running["tracker_hash"] = self.tracker.hash_digest()
 
-            dprint(" Uploading to the cloud....")
+            dprint("Uploading to the cloud....")
             data_to_remote = to_serializable(self.tracker.running)
             # Remove ad-hoc hash advertisement keys so they don't pollute the persisted tracker state.
             self.tracker.running.pop("config_hash", None)
@@ -944,7 +1107,7 @@ async def main():
         await upload.run()
 
     else:
-        # After first boot setup, go to deep sleep
+        # Cold boot / soft reset / hard reset: WiFi + NTP + remote config
         boot = BootFSM(config, tracker, np_obj, adc_vin, np_vcc)
         await boot.run()
 
@@ -957,8 +1120,10 @@ if __name__ == "__main__":
         scheduler_wd = Timer(TIMER_NUM)
         scheduler_wd.init(period=8000, mode=Timer.PERIODIC, callback=wdt_chk)
 
-        WLAN(AP_IF).active(False)
-        sta_if.active(False)
+        # Free SoftAP left over from maintenance soft_reset; STA stays lazy.
+        release_wifi_radios()
+        # Keep soft WDT happy during multi-second WiFi connect / NTP / upload.
+        network_helper.wdt_tick = wdt_feed
 
         config = Config()
         tracker = Tracker(np_obj)

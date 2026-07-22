@@ -122,6 +122,7 @@ def main():
         "rgb.py",
         "util.py",
         "ap_mode.py",
+        "ap_session.py",
         "credentials.py",
     ]
     for f in files:
