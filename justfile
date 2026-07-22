@@ -24,10 +24,10 @@ esp_chip := "s3"                             # esptool --chip esp32{{ esp_chip }
 esp_flash_size := "4MB"                      # document your module flash; shown by `just env`
 
 # Firmware modules for the ESP only (not host tools: test_fsm.py, clean_frozen.py, scripts/)
-device_py := "main.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py"
+device_py := "main.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py"
 # AST-stripped modules written by `just clean-frozen` (no main.py — kept full-size / editable)
 cleaned_dir := "/tmp/flipbuddy_cleaned"
-cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py"
+cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py"
 
 [private]
 default:
@@ -187,11 +187,27 @@ env:
     @echo "AMPY_PORT = {{ usb_dev }}"
     @echo "Target chip = esp32{{ esp_chip }} (flash {{ esp_flash_size }})"
 
-# Host tests for FSMs (mocks MicroPython so they run on CPython)
-# Prefers pytest if available, otherwise falls back to test_fsm.py's built-in runner
+# Host tests (CONTRIBUTING.md): SoftAP helpers via pytest, FSM suite via test_fsm runner.
+# Prefer project .venv after `uv sync`. test_fsm.py keeps its own MicroPython mocks and
+# asyncio runner so it does not fight tests/conftest.py shims under one pytest process.
 [group("Utils")]
 test:
-    python3 -m pytest test_fsm.py -q --tb=short 2>/dev/null || python3 test_fsm.py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x .venv/bin/python ]]; then
+      PY=.venv/bin/python
+    else
+      PY=python3
+    fi
+    echo "→ SoftAP / credentials host tests (tests/)"
+    if "$PY" -c "import pytest" 2>/dev/null; then
+      "$PY" -m pytest tests -q --tb=short
+    else
+      echo "pytest missing — run: uv sync" >&2
+      exit 1
+    fi
+    echo "→ FSM host suite (test_fsm.py)"
+    "$PY" test_fsm.py
 
 # Full pre-release safety audit (secrets, personal paths, credentials on disk, history)
 # Maintainers/contributors only — see CONTRIBUTING.md. Run before a public push/tag.
@@ -261,8 +277,12 @@ hooks:
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v ruff >/dev/null 2>&1; then
+    if [[ -x .venv/bin/ruff ]]; then
+      .venv/bin/ruff check *.py
+    elif command -v ruff >/dev/null 2>&1; then
       ruff check *.py
+    elif [[ -x .venv/bin/python ]]; then
+      .venv/bin/python -m py_compile *.py
     else
       python3 -m py_compile *.py
     fi
@@ -270,12 +290,20 @@ check:
 # Auto-fix lint issues + format with ruff (mpu6050.py:45-190 protected by fmt: off)
 [group("Utils")]
 fix:
-    ruff check --fix *.py --ignore E501
-    ruff format *.py
-    @echo "Ruff auto-fix + format complete (protected blocks were left untouched)"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUFF=ruff
+    [[ -x .venv/bin/ruff ]] && RUFF=.venv/bin/ruff
+    "$RUFF" check --fix *.py --ignore E501
+    "$RUFF" format *.py
+    echo "Ruff auto-fix + format complete (protected blocks were left untouched)"
 
 # Format with ruff (respects # fmt: off for mpu6050.py lines 45-190)
 [group("Utils")]
 fmt:
-    ruff format *.py
-    @echo "Ruff format complete (protected blocks were left untouched)"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RUFF=ruff
+    [[ -x .venv/bin/ruff ]] && RUFF=.venv/bin/ruff
+    "$RUFF" format *.py
+    echo "Ruff format complete (protected blocks were left untouched)"

@@ -17,6 +17,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install host test deps
+        run: pip install pytest
+
+      - name: SoftAP / credentials host tests
+        run: python -m pytest tests -q --tb=short
+
       - name: Host FSM tests
         run: python3 test_fsm.py
 

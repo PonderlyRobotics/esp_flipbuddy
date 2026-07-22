@@ -6,7 +6,7 @@
 
 [project]
 name = "flipbuddy"
-version = "0.1.0"
+version = "0.1.1"
 description = "OpenSource Time Tracking IoT Sensor"
 readme = "README.md"
 
@@ -16,6 +16,8 @@ dependencies = [
     "adafruit-ampy>=1.1.0",
     "esptool>=5.1.0",
     "mpremote>=1.24.0",
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
 ]
 
 [tool.ruff]
@@ -43,5 +45,8 @@ fixable = ["ALL"]
 unfixable = []
 
 # Host tests mock MicroPython before importing project modules.
+# main.py: SoftAP early gate must run before heavy imports (clean heap after soft_reset).
 [tool.ruff.lint.per-file-ignores]
 "test_fsm.py" = ["E402"]
+"tests/*" = ["E402"]
+"main.py" = ["E402"]
