@@ -124,19 +124,19 @@ Please do not commit real credentials, `.env` files, private keys, absolute home
 
 We keep Super Mini images out of git and put them on Releases with checksums.
 
-1. Build the image (MicroPython + IDF; `just clean-frozen` if that is part of your flow). Name it something like `esp32_s3_flipbuddy_0.1.1.bin`. Leave it untracked.
+1. Build the image (MicroPython + IDF; `just clean-frozen` if that is part of your flow). Name it something like `esp32_s3_flipbuddy_0.1.2.bin`. Leave it untracked.
 
 2. Run `just release-check` on the tree you built from.
 
 3. Hash it:
 
    ```bash
-   just release-assets esp32_s3_flipbuddy_0.1.1.bin v0.1.1
+   just release-assets esp32_s3_flipbuddy_0.1.2.bin v0.1.2
    ```
 
 4. Tag that commit and push the tag.
 
-5. Create the GitHub Release (`just release-publish …` or `gh release create`) and attach the `.bin` plus checksum files. [docs/RELEASE_NOTES_v0.1.1.md](./docs/RELEASE_NOTES_v0.1.1.md) is a fine template for the notes body.
+5. Create the GitHub Release (`just release-publish …` or `gh release create`) and attach the `.bin` plus checksum files. [docs/RELEASE_NOTES_v0.1.2.md](./docs/RELEASE_NOTES_v0.1.2.md) is a fine template for the notes body.
 
 6. If the README still names an old image, update the version string there.
 
@@ -145,8 +145,8 @@ Never `git add` the `.bin`.
 To flash after download:
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.1.1.bin.sha256
-just flash-firmware esp32_s3_flipbuddy_0.1.1.bin
+sha256sum -c esp32_s3_flipbuddy_0.1.2.bin.sha256
+just flash-firmware esp32_s3_flipbuddy_0.1.2.bin
 ```
 
 ## Tests

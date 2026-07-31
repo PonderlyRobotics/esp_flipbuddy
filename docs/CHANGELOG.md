@@ -2,6 +2,17 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.1.2 (2026-07-31)
+
+Face orientation aligned to the physical LED chain and enclosure:
+
+- Remap NeoPixel face labels in `rgb.py` pinout (DIN 0…5): back→front, left→bottom, front→back, bottom→left, right→top, top→right
+- Same rename in `cube_face_upward()` gravity returns so upward face, LED, and tracker name agree
+- Update SoftAP / cutout **triad** face tuples for the new labels; `front_cutout` / `back_cutout` detection names unchanged
+- CI: GitHub Actions `checkout` and `setup-python` majors that run on Node 24
+
+Frozen Release image: `esp32_s3_flipbuddy_0.1.2.bin` (MicroPython 1.27 + SoftAP stack from 0.1.1 + this fix). Fast track still needs a **full reflash** of the `.bin` (not only `main.py`), then `main.py` + credentials. See [RELEASE_NOTES_v0.1.2.md](./RELEASE_NOTES_v0.1.2.md).
+
 ## 0.1.1 (2026-07-22)
 
 SoftAP maintenance mode and related host tooling:

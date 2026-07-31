@@ -4,7 +4,7 @@
 #
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
-#   2. just flash-firmware esp32_s3_flipbuddy_0.1.0.bin
+#   2. just flash-firmware esp32_s3_flipbuddy_0.1.2.bin
 #   3. just fast-track   # main.py + credentials.json
 #   4. Power cycle the device.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
@@ -225,7 +225,7 @@ release-check:
     @echo "✓ release-check passed. Review any warnings above before publishing."
 
 # Hash a frozen .bin for GitHub Releases (writes .sha256 + SHA256SUMS; does not upload)
-# Positional args only: just release-assets esp32_s3_flipbuddy_0.1.1.bin v0.1.1
+# Positional args only: just release-assets esp32_s3_flipbuddy_0.1.2.bin v0.1.2
 [group("Utils")]
 release-assets firmware tag="":
     #!/usr/bin/env bash
@@ -242,7 +242,7 @@ release-assets firmware tag="":
     python3 "${args[@]}"
 
 # Create GitHub Release + upload .bin and checksums (requires: gh auth login)
-# Positional: just release-publish esp32_s3_flipbuddy_0.1.1.bin v0.1.1
+# Positional: just release-publish esp32_s3_flipbuddy_0.1.2.bin v0.1.2
 [group("Utils")]
 release-publish firmware tag:
     #!/usr/bin/env bash
