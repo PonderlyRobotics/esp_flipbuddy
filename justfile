@@ -124,9 +124,9 @@ pull-nvs-state out=".":
 
 # Full erase + flash a firmware .bin (download frozen images from GitHub Releases first)
 [group("Device")]
-flash-firmware firmware="esp32_s3_flipbuddy_0.1.0.bin":
+flash-firmware firmware="esp32_s3_flipbuddy_0.1.2.bin":
     # Examples:
-    #   just flash-firmware esp32_s3_flipbuddy_0.1.0.bin   # from GitHub Releases
+    #   just flash-firmware esp32_s3_flipbuddy_0.1.2.bin   # from GitHub Releases
     #   just flash-firmware ESP32_GENERIC_S3-....bin       # stock MicroPython
     #
     # Frozen FlipBuddy images are on GitHub Releases (not committed). Verify .sha256 then flash.
