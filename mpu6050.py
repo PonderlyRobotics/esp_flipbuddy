@@ -539,12 +539,13 @@ def cube_face_upward(sensor: MPU6050, margin=0.2, angle_margin=10):
         return "front_cutout"
 
     # 2. Face Detection Using Acceleration (Gravity)**
+    # Renamed faces: back→front, left→bottom, front→back, bottom→left, right→top, top→right
     if -margin <= x <= margin and -margin <= y <= margin:
-        return "bottom" if z > 0 else "top"
+        return "left" if z > 0 else "right"  # was bottom / top
     elif -margin <= y <= margin and -margin <= z <= margin:
-        return "left" if x > 0 else "right"
+        return "bottom" if x > 0 else "top"  # was left / right
     elif -margin <= x <= margin and -margin <= z <= margin:
-        return "back" if y > 0 else "front"
+        return "front" if y > 0 else "back"  # was back / front
 
     # 3. Additional Tilt Detection (Using asin/acos Method)**
     # If the tilt angles indicate the cube is **not aligned** with any face

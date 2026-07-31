@@ -10,12 +10,12 @@ MAX_INTENSITY = 50
 DEFAULT_INTENSITY_LEVEL = 1
 
 pinout = {
-    "back": {"led": 0, "type": "neopixel"},
-    "left": {"led": 1, "type": "neopixel"},
-    "front": {"led": 2, "type": "neopixel"},
-    "bottom": {"led": 3, "type": "neopixel"},
-    "right": {"led": 4, "type": "neopixel"},
-    "top": {"led": 5, "type": "neopixel"},
+    "front": {"led": 0, "type": "neopixel"},
+    "bottom": {"led": 1, "type": "neopixel"},
+    "back": {"led": 2, "type": "neopixel"},
+    "left": {"led": 3, "type": "neopixel"},
+    "top": {"led": 4, "type": "neopixel"},
+    "right": {"led": 5, "type": "neopixel"},
 }
 
 
@@ -392,8 +392,8 @@ class FaceLEDNeoPixel(FaceLEDBase):
         print(f"triad_led called for {view}, status={status}")
         self.error_combo = []  # Clear previous error LED channels
         x = {
-            "front_cutout": ("bottom", "left", "front"),
-            "back_cutout": ("top", "right", "back"),
+            "front_cutout": ("top", "right", "front"),
+            "back_cutout": ("bottom", "left", "back"),
         }
         if status:
             triad_view = x.get(view, [])
