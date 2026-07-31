@@ -392,8 +392,8 @@ class FaceLEDNeoPixel(FaceLEDBase):
         print(f"triad_led called for {view}, status={status}")
         self.error_combo = []  # Clear previous error LED channels
         x = {
-            "front_cutout": ("top", "right", "front"),
-            "back_cutout": ("bottom", "left", "back"),
+            "front_cutout": ("bottom", "left", "back"),
+            "back_cutout": ("top", "right", "front"),
         }
         if status:
             triad_view = x.get(view, [])
