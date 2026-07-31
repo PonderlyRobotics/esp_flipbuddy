@@ -2,16 +2,25 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.1.3 (2026-07-31)
+
+Cutout triad LED fix (prefer this over 0.1.2 for new flashes):
+
+- Swap `triad_led` mappings so after the 0.1.2 pinout rename, `front_cutout` lights bottom/left/back and `back_cutout` lights top/right/front
+- Flat-face gravity remap and pinout labels unchanged from 0.1.2
+
+Frozen Release image: `esp32_s3_flipbuddy_0.1.3.bin`. Full reflash required (frozen `rgb.py`). See [RELEASE_NOTES_v0.1.3.md](./RELEASE_NOTES_v0.1.3.md).
+
 ## 0.1.2 (2026-07-31)
 
 Face orientation aligned to the physical LED chain and enclosure:
 
 - Remap NeoPixel face labels in `rgb.py` pinout (DIN 0…5): back→front, left→bottom, front→back, bottom→left, right→top, top→right
 - Same rename in `cube_face_upward()` gravity returns so upward face, LED, and tracker name agree
-- Update SoftAP / cutout **triad** face tuples for the new labels; `front_cutout` / `back_cutout` detection names unchanged
+- Cutout triad tuples were updated with the rename but **swapped** relative to front/back cutout — fixed in **0.1.3**
 - CI: GitHub Actions `checkout` and `setup-python` majors that run on Node 24
 
-Frozen Release image: `esp32_s3_flipbuddy_0.1.2.bin` (MicroPython 1.27 + SoftAP stack from 0.1.1 + this fix). Fast track still needs a **full reflash** of the `.bin` (not only `main.py`), then `main.py` + credentials. See [RELEASE_NOTES_v0.1.2.md](./RELEASE_NOTES_v0.1.2.md).
+Frozen Release image: `esp32_s3_flipbuddy_0.1.2.bin` (known cutout triad bug). Prefer **0.1.3**. See [RELEASE_NOTES_v0.1.2.md](./RELEASE_NOTES_v0.1.2.md).
 
 ## 0.1.1 (2026-07-22)
 

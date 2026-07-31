@@ -3,14 +3,14 @@
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](./.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Hardware: CC BY--NC--SA 4.0](https://img.shields.io/badge/Hardware-CC%20BY--NC--SA%204.0-lightgrey.svg)](./LICENSE-HARDWARE)
-[![Release](https://img.shields.io/badge/release-v0.1.2-blue.svg)](./docs/CHANGELOG.md)
+[![Release](https://img.shields.io/badge/release-v0.1.3-blue.svg)](./docs/CHANGELOG.md)
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.27-2B2728.svg)](https://micropython.org/)
 
 I kept forgetting to start the timer on my phone. FlipBuddy is my fix for that: a printed cube on the desk. You flip a face up, that activity is on. The LEDs show the color you picked in the free app at [flipbuddy.app](https://flipbuddy.app). No app hunt every time you switch tasks.
 
 I thought it would take a weekend. It took months. That’s fine. The result is still a simple cube: flip a face, log the time, check the history later in the app if you want.
 
-This repository is the open DIY build. Firmware is **0.1.2**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
+This repository is the open DIY build. Firmware is **0.1.3**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
 <p align="center">
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
@@ -20,7 +20,7 @@ If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assem
 
 | | |
 |--|--|
-| Firmware image | `esp32_s3_flipbuddy_0.1.2.bin` on GitHub Releases (MicroPython 1.27; helpers frozen in; not in git) |
+| Firmware image | `esp32_s3_flipbuddy_0.1.3.bin` on GitHub Releases (MicroPython 1.27; helpers frozen in; not in git) |
 | Enclosure | [stl/](./stl/) |
 | Assembly | [FlipBuddy Assembly guide.pdf](./FlipBuddy%20Assembly%20guide.pdf) |
 | Software license | [MIT](./LICENSE) |
@@ -36,7 +36,7 @@ The design is for minutes and hours, not a stopwatch. It prefers boards you can 
 - [Battery (rough)](#battery-rough)
 - [Getting started](#getting-started)
   - [Serial port and board](#serial-port-and-board-justfile)
-  - [Fast track (v0.1.2)](#fast-track-v012)
+  - [Fast track (v0.1.3)](#fast-track-v013)
   - [DIY path](#diy-path)
 - [Assembly, printing, and parts](#assembly-printing-and-parts)
 - [Web app](#web-app)
@@ -69,7 +69,7 @@ USB-C face up can open **SoftAP maintenance mode** (local captive portal — see
 
 When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
 
-Full SoftAP needs the portal modules on the device: the **0.1.2** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (open AP, cleartext HTTP, PIN): [SECURITY.md](./SECURITY.md).
+Full SoftAP needs the portal modules on the device: the **0.1.3** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (open AP, cleartext HTTP, PIN): [SECURITY.md](./SECURITY.md).
 
 | | |
 |--|--|
@@ -148,7 +148,7 @@ Build and wire the cube first ([assembly section](#assembly-printing--bom) and t
 
 | Path | Use when | What you put on the device |
 |------|----------|----------------------------|
-| [Fast track](#fast-track-v012) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
+| [Fast track](#fast-track-v013) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
 | [DIY path](#diy-path) | Other boards, or you want every `.py` on the filesystem | Stock MicroPython + all sources + credentials |
 
 ### Serial port and board (`justfile`)
@@ -173,13 +173,13 @@ just env
 
 The Release fast-track image is ESP32-S3 only. Other chips need the DIY path. Commands below use `/dev/ttyACM0` and `esp32s3`; change them if you are not using `just`.
 
-### Fast track (v0.1.2)
+### Fast track (v0.1.3)
 
 Helpers (including SoftAP portal modules) are frozen into the image. You only place `main.py` and `credentials.json` on the filesystem so you can tweak the entrypoint without rebuilding MicroPython.
 
 | | |
 |--|--|
-| Image | `esp32_s3_flipbuddy_0.1.2.bin` from GitHub **Releases** |
+| Image | `esp32_s3_flipbuddy_0.1.3.bin` from GitHub **Releases** |
 | Checksum | Matching `.bin.sha256` or `SHA256SUMS` on the same release |
 | Runtime | MicroPython 1.27 |
 | Board | ESP32-S3 Super Mini class with battery charger |
@@ -188,19 +188,19 @@ Helpers (including SoftAP portal modules) are frozen into the image. You only pl
 
 Use this README for flashing. The assembly PDF is for mechanics; if it only mentions stock MicroPython, prefer the frozen Release image for Super Mini.
 
-On GitHub: **Releases** → tag **v0.1.2** (or latest 0.1.x). Download the `.bin` and checksum file.
+On GitHub: **Releases** → tag **v0.1.3** (or latest 0.1.x). Download the `.bin` and checksum file.
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.1.2.bin.sha256
+sha256sum -c esp32_s3_flipbuddy_0.1.3.bin.sha256
 
 esptool --chip esp32s3 --port /dev/ttyACM0 erase-flash
-esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.2.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.3.bin
 ```
 
 Or, with the file in the repo directory:
 
 ```bash
-just flash-firmware esp32_s3_flipbuddy_0.1.2.bin
+just flash-firmware esp32_s3_flipbuddy_0.1.3.bin
 ```
 
 #### 2. Credentials
@@ -409,5 +409,5 @@ If you want to use the enclosure designs commercially, please ask first. The non
 - [docs/media/](./docs/media/)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [SECURITY.md](./SECURITY.md)
-- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.2.md](./docs/RELEASE_NOTES_v0.1.2.md)
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.3.md](./docs/RELEASE_NOTES_v0.1.3.md)
 - [LICENSE](./LICENSE), [LICENSE-HARDWARE](./LICENSE-HARDWARE)
