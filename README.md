@@ -6,9 +6,9 @@
 [![Release](https://img.shields.io/badge/release-v0.1.3-blue.svg)](./docs/CHANGELOG.md)
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.27-2B2728.svg)](https://micropython.org/)
 
-I kept forgetting to start the timer on my phone. FlipBuddy is my fix for that: a printed cube on the desk. You flip a face up, that activity is on. The LEDs show the color you picked in the free app at [flipbuddy.app](https://flipbuddy.app). No app hunt every time you switch tasks.
+I kept forgetting to start and stop phone time trackers. FlipBuddy is my fix: a printed cube on the desk. Face up means that activity is on (not a countdown alarm). Flip when you switch; stop face when you are done. The cube logs face changes. LEDs show the colors you set in the free app at [flipbuddy.app](https://flipbuddy.app) if you use it.
 
-I thought it would take a weekend. It took months. That’s fine. The result is still a simple cube: flip a face, log the time, check the history later in the app if you want.
+I thought it would take a weekend. It took months. That is fine. Still a simple cube: flip a face, log the time, check history later in the free app if you want.
 
 This repository is the open DIY build. Firmware is **0.1.3**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
@@ -57,11 +57,15 @@ The design is for minutes and hours, not a stopwatch. It prefers boards you can 
 
 ## Day to day
 
-You set activity names and colors in the browser. The cube only records sessions. Config updates land when the cube next wakes and syncs.
+You set activity names, descriptions, and colors in the browser, plus device settings (for example OTA on/off, how often the cube wakes, and how often it should join Wi-Fi and check in with the server). The cube records which face is up and when (activity periods).
 
-Wi-Fi is used for uploads, sometimes on the stop face, and when USB is plugged in. On stop, sleep intervals grow so the battery lasts longer.
+When the cube is online it talks both ways with the free app:
+- **Up:** upload face changes (activity periods) for history on flipbuddy.app
+- **Down:** pull activity name, description, color, and device configuration for that cube
 
-If Wi-Fi is down but credentials are already installed, the cube still boots and can log with defaults. Full face colors and history still need flipbuddy.app for normal use.
+Wi-Fi is used for those check-ins, sometimes on the stop face, and when USB is plugged in. On stop, sleep intervals grow so the battery lasts longer.
+
+If Wi-Fi is down but credentials are already installed, the cube still boots and can log with defaults (last known face map). Full face colors, fresh names, and history still need flipbuddy.app for normal use.
 
 USB-C face up can open **SoftAP maintenance mode** (local captive portal — see below). Blinking all leds red often means bad orientation or low battery. AI in the app can be turned off.
 
