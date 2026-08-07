@@ -10,6 +10,9 @@ I kept forgetting to start and stop phone time trackers. FlipBuddy is my fix: a 
 
 I thought it would take a weekend. It took months. That is fine. Still a simple cube: flip a face, log the time, check history later in the free app if you want.
 
+Hackaday wrote about the project:  
+https://hackaday.com/2026/08/07/flipbuddy-is-borg-you-will-be-assimilated/
+
 This repository is the open DIY build. Firmware is **0.1.3**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
 <p align="center">
@@ -407,6 +410,7 @@ If you want to use the enclosure designs commercially, please ask first. The non
 ## Links
 
 - App: https://flipbuddy.app
+- Hackaday write-up: https://hackaday.com/2026/08/07/flipbuddy-is-borg-you-will-be-assimilated/
 - Firmware binaries: GitHub Releases (`esp32_s3_flipbuddy_*.bin` + checksums)
 - [Assembly PDF](./FlipBuddy%20Assembly%20guide.pdf)
 - [stl/](./stl/)
