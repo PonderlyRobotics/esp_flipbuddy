@@ -50,6 +50,6 @@ a2201ff7b3118e1b1f6fada2c02bb146f70a1771d6189f50b6d74e8615a29c2a  esp32_s3_flipb
 ## Links
 
 - App: https://flipbuddy.app
-- Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- Changelog: [CHANGELOG.md](https://github.com/PonderlyRobotics/esp_flipbuddy/blob/main/docs/CHANGELOG.md)
 - Prior notes: [v0.1.3](./RELEASE_NOTES_v0.1.3.md), [v0.1.2](./RELEASE_NOTES_v0.1.2.md), [v0.1.1](./RELEASE_NOTES_v0.1.1.md), [v0.1.0](./RELEASE_NOTES_v0.1.0.md)
 - This GitHub repository for source, STLs, and docs
