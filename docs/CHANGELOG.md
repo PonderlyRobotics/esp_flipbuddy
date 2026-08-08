@@ -2,6 +2,16 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.1.4 (2026-08-08)
+
+Maintenance release with internal firmware optimizations for memory and stability.
+
+- **Memory Optimization:** Reduced initial RAM usage by ~11.6 KB through `const()` declarations and static FSM state strings, lowering heap fragmentation.
+- **Session Durability:** Open tracking sessions are now reconciled after a reboot, preventing data loss.
+- **NVS Hygiene:** Ephemeral data is no longer saved to non-volatile storage, reducing flash writes.
+
+Frozen Release image: `esp32_s3_flipbuddy_0.1.4.bin`. Full reflash recommended. See [RELEASE_NOTES_v0.1.4.md](./RELEASE_NOTES_v0.1.4.md).
+
 ## 0.1.3 (2026-07-31)
 
 Cutout triad LED fix (prefer this over 0.1.2 for new flashes):
