@@ -39,8 +39,7 @@ def _early_softap_gate():
     except Exception:
         pass
     try:
-        import gc
-
+        
         gc.collect()
         import ap_session
 
@@ -59,6 +58,7 @@ _early_softap_gate()
 
 # --- normal firmware (heavy imports only after SoftAP gate) ---
 # E402 ignored for this file in pyproject.toml (gate before models/MPU/http).
+import gc
 from http import (
     async_post_request,
     async_rotate_device_token,
@@ -100,13 +100,14 @@ from util import read_battery_voltage, rgb_self_test, str_to_epoch, suppress, ti
 # 240Mhz Note: Going lower cause led flicker due to software based async execution
 freq(240000000)
 
-DEFAULT_SLEEP_TIME = 18  # seconds
-DEFAULT_UPLOAD_FRQ = 300  # seconds
-DEFAULT_OTA = 7  # days
-DEFAULT_INDICATOR_BLINK_DURATION = 7000  # ms
-DEFAULT_INDICATOR_BLINK_CYCLE = 1
-MAX_SLEEP_TIME = 900  # seconds
-FACES = ["front", "back", "left", "right", "top", "bottom"]
+DEFAULT_BAT_CAPACITY = const(550)
+DEFAULT_SLEEP_TIME = const(18)  # seconds
+DEFAULT_UPLOAD_FRQ = const(300)  # seconds
+DEFAULT_OTA = const(7)  # days
+DEFAULT_INDICATOR_BLINK_DURATION = const(7000)  # ms
+DEFAULT_INDICATOR_BLINK_CYCLE = const(1)
+MAX_SLEEP_TIME = const(900)  # seconds
+FACES = const(("front", "back", "left", "right", "top", "bottom"))
 
 # Hardware pins
 NP_VCC_PIN = const(7)
@@ -128,7 +129,7 @@ BATTERY_NOMINAL_V = const(3.7)
 USB_VOLTAGE_THRESHOLD = const(4.3)  # > this → USB power
 
 # General
-TIMER_NUM = 1
+TIMER_NUM = const(1)
 # PIN_WAKE = 7  # micropython passed gpio wake reason directly when GPIO is used for wake not ext0/1
 
 DEBUG = False
@@ -378,6 +379,7 @@ async def prepare_for_deep_sleep(
     deep sleep current is minimized (target << 1mA when LEDs and MPU are correctly gated).
     """
     dprint("prepare_for_deep_sleep: powering down peripherals for minimal current draw")
+    gc.collect()
 
     # Safe fallbacks to module-level objects
     if np_vcc is None:
@@ -469,60 +471,72 @@ async def ota_weekly_check(tracker_obj):
 # -- BootFSM - first boot / cold start -------
 # ------------------------------------------
 class BootFSM(BaseFSM):
+    S_FIRST_BOOT = "FIRST_BOOT"
+    S_DEEP_SLEEP_WAKE = "DEEP_SLEEP_WAKE"
+    S_SENSOR_INIT = "SENSOR_INIT"
+    S_WIFI_CONNECT = "WIFI_CONNECT"
+    S_SYNC_NTP = "SYNC_NTP"
+    S_FETCH_CONFIG = "FETCH_CONFIG"
+    S_CALIBRATE = "CALIBRATE"
+    S_PARSE_FACES = "PARSE_FACES"
+    S_APPLY_REMOTE = "APPLY_REMOTE"
+    S_DISCONNECT = "DISCONNECT"
+    S_DEEP_SLEEP = "DEEP_SLEEP"
+
     def __init__(self, config, tracker, np_obj=None, adc_vin=None, np_vcc=None):
         self.config = config
         self.tracker = tracker
         self.np_obj = np_obj
         self.adc_vin = adc_vin
         self.np_vcc = np_vcc
-        self.state = "FIRST_BOOT"
+        self.state = self.S_FIRST_BOOT
         self.is_connected = False
         self.rules = {
-            "FIRST_BOOT": [
+            self.S_FIRST_BOOT: [
                 Transition(
-                    "SENSOR_INIT", lambda: True, lambda: self.enter_sensor_init()
+                    self.S_SENSOR_INIT, lambda: True, lambda: self.enter_sensor_init()
                 ),
             ],
-            "DEEP_SLEEP_WAKE": [
+            self.S_DEEP_SLEEP_WAKE: [
                 Transition(
                     "FACE_DETECT", lambda: True, lambda: self.wake_peripherals()
                 ),
             ],
-            "SENSOR_INIT": [
-                Transition("WIFI_CONNECT", lambda: True, lambda: self.connect_wifi()),
+            self.S_SENSOR_INIT: [
+                Transition(self.S_WIFI_CONNECT, lambda: True, lambda: self.connect_wifi()),
             ],
             # Online: NTP + remote face map. Offline: keep Tracker defaults and continue.
-            "WIFI_CONNECT": [
+            self.S_WIFI_CONNECT: [
                 Transition(
-                    "SYNC_NTP", lambda: self.is_connected, lambda: self.sync_ntp()
+                    self.S_SYNC_NTP, lambda: self.is_connected, lambda: self.sync_ntp()
                 ),
                 Transition(
-                    "CALIBRATE",
+                    self.S_CALIBRATE,
                     lambda: not self.is_connected,
                     lambda: self.boot_offline(),
                 ),
             ],
-            "SYNC_NTP": [
+            self.S_SYNC_NTP: [
                 Transition(
-                    "FETCH_CONFIG",
+                    self.S_FETCH_CONFIG,
                     lambda: True,
                     lambda: self.fetch_config(),
                 ),
             ],
-            "FETCH_CONFIG": [
-                Transition("CALIBRATE", lambda: True, lambda: self.calibrate()),
+            self.S_FETCH_CONFIG: [
+                Transition(self.S_CALIBRATE, lambda: True, lambda: self.calibrate()),
             ],
-            "CALIBRATE": [
-                Transition("PARSE_FACES", lambda: True, lambda: self.parse_faces()),
+            self.S_CALIBRATE: [
+                Transition(self.S_PARSE_FACES, lambda: True, lambda: self.parse_faces()),
             ],
-            "PARSE_FACES": [
-                Transition("APPLY_REMOTE", lambda: True, lambda: self.apply_remote()),
+            self.S_PARSE_FACES: [
+                Transition(self.S_APPLY_REMOTE, lambda: True, lambda: self.apply_remote()),
             ],
-            "APPLY_REMOTE": [
-                Transition("DISCONNECT", lambda: True, lambda: self.disconnect()),
+            self.S_APPLY_REMOTE: [
+                Transition(self.S_DISCONNECT, lambda: True, lambda: self.disconnect()),
             ],
-            "DISCONNECT": [
-                Transition("DEEP_SLEEP", lambda: True, lambda: self.enter_deep_sleep()),
+            self.S_DISCONNECT: [
+                Transition(self.S_DEEP_SLEEP, lambda: True, lambda: self.enter_deep_sleep()),
             ],
         }
         self.remote_config = None
@@ -530,19 +544,41 @@ class BootFSM(BaseFSM):
     def enter_sensor_init(self):
         dprint("Initializing sensor and uploading DMP firmware...")
         wdt_feed()
+
+        # Check if we already have calibration data
+        cal_data = self.config.running.get("calibration", {})
+        mean = cal_data.get("mean")
+        stddev = cal_data.get("stddev")
+        
+        # Only skip calibration if waking from deep sleep AND we have valid data.
+        # Hard resets, power cycles, etc., should always re-calibrate.
+        should_calibrate = True
+        if reset_cause() == DEEPSLEEP_RESET and (mean and stddev):
+            should_calibrate = False
+
         s = sensor_init(
             enable_mpu=True,
             sda_pin=SDA_PIN,
             scl_pin=SCL_PIN,
             intruppt_pin=INTERRUPT_PIN,
+            calibrate=should_calibrate,
+            mean=mean,      # Pass existing data regardless
+            stddev=stddev,
         )
-        s.upload_dmp_firmware()
-        wdt_feed()
-        self.config.running["calibration"]["mean"] = s.mean
-        self.config.running["calibration"]["stddev"] = s.stddev
-        self.config.apply(self.config.running)
-        self.config.save()
+        
+        if should_calibrate:
+            dprint("INFO: Performing full sensor calibration...")
+            s.upload_dmp_firmware()
+            self.config.running["calibration"]["mean"] = s.mean
+            self.config.running["calibration"]["stddev"] = s.stddev
+            self.config.apply(self.config.running)
+            self.config.save()
+            dprint("INFO: Calibration data saved to NVS.")
+        else:
+            dprint("INFO: Deep sleep wake. Using existing calibration data from NVS.")
 
+        wdt_feed()
+        
     async def connect_wifi(self):
         dprint("Connecting to WiFi...")
         wdt_feed()
@@ -554,8 +590,8 @@ class BootFSM(BaseFSM):
             self.is_connected = False
 
     async def boot_offline(self):
-        """First boot without network: keep calibrated sensor + factory/default faces."""
-        dprint("BootFSM offline: using configured default faces (no dashboard)")
+        """First boot without network: keep calibrated sensor + NVS face state."""
+        dprint("BootFSM offline: using NVS / default faces (no dashboard)")
         wdt_feed()
         # Light self-test so the user sees the cube is alive without cloud
         if self.np_vcc:
@@ -565,7 +601,11 @@ class BootFSM(BaseFSM):
             rgb_self_test(np_obj)
         except Exception as e:
             dprint("offline rgb_self_test:", e)
-        # Keep empty factory face map (nudge: assign faces via dashboard when online)
+        # Item 2: after power-loss, resume or force-close open sessions (no silent drop).
+        try:
+            await self.tracker.reconcile_open_sessions_after_time_sync()
+        except Exception as e:
+            dprint("offline session reconcile:", e)
         self.tracker.apply(self.tracker.running)
         self.tracker.save()
 
@@ -573,6 +613,11 @@ class BootFSM(BaseFSM):
         dprint("Syncing NTP...")
         await sync_time_if_possible()
         wdt_feed()
+        # Item 2: clock is trustworthy after NTP; resume or force-close open sessions.
+        try:
+            await self.tracker.reconcile_open_sessions_after_time_sync()
+        except Exception as e:
+            dprint("post-NTP session reconcile:", e)
         if self.np_vcc:
             self.np_vcc.on()
             time.sleep_ms(50)  # or 30-100ms for rail stabilization
@@ -634,13 +679,23 @@ class BootFSM(BaseFSM):
 # -- ActiveFSM - face detection & tracking --
 # -------------------------------------------
 class ActiveFSM(BaseFSM):
+    S_FACE_INDICATOR = "FACE_INDICATOR"
+    S_FACE_DETECT = "FACE_DETECT"
+    S_FACE_CHECKED = "FACE_CHECKED"
+    S_AP_MODE = "AP_MODE"
+    S_DEEP_SLEEP = "DEEP_SLEEP"
+    S_STOP_FACE_CHECK = "STOP_FACE_CHECK"
+    S_ACTIVE_TRACKING = "ACTIVE_TRACKING"
+    S_STOP_TRACKING = "STOP_TRACKING"
+    S_UPLOAD_NEEDED = "UPLOAD_NEEDED"
+
     def __init__(self, config, tracker, np_obj, adc_vin, np_vcc):
         self.config = config
         self.tracker = tracker
         self.np_obj = np_obj
         self.adc_vin = adc_vin
         self.np_vcc = np_vcc
-        self.state = "FACE_INDICATOR"
+        self.state = self.S_FACE_INDICATOR
         self.face_obj = None
         self.sleep_ms = (
             self.config.running["settings"].get(
@@ -652,17 +707,17 @@ class ActiveFSM(BaseFSM):
         self.ap_mode = False
 
         self.rules = {
-            "FACE_INDICATOR": [
+            self.S_FACE_INDICATOR: [
                 Transition(
-                    "FACE_DETECT", lambda: True, lambda: self.show_face_indicator()
+                    self.S_FACE_DETECT, lambda: True, lambda: self.show_face_indicator()
                 )
             ],
-            "FACE_DETECT": [
-                Transition("FACE_CHECKED", lambda: True, lambda: self.detect_face()),
+            self.S_FACE_DETECT: [
+                Transition(self.S_FACE_CHECKED, lambda: True, lambda: self.detect_face()),
             ],
-            "FACE_CHECKED": [
+            self.S_FACE_CHECKED: [
                 Transition(
-                    "AP_MODE",
+                    self.S_AP_MODE,
                     lambda: (
                         SOFTAP_CAPTIVE_PORTAL_ENABLED
                         and self.config.running["settings"].get(
@@ -674,36 +729,36 @@ class ActiveFSM(BaseFSM):
                     ),
                     lambda: self.start_ap_mode(),
                 ),
-                Transition("STOP_FACE_CHECK", lambda: True, lambda: None),
+                Transition(self.S_STOP_FACE_CHECK, lambda: True, lambda: None),
             ],
             # soft_reset does not return; if it fails, still evaluate upload (USB often present).
-            "AP_MODE": [
+            self.S_AP_MODE: [
                 Transition(
-                    "UPLOAD_NEEDED",
+                    self.S_UPLOAD_NEEDED,
                     lambda: True,
                     lambda: self.handle_ap_mode(),
                 ),
             ],
-            "DEEP_SLEEP": [],
-            "STOP_FACE_CHECK": [
+            self.S_DEEP_SLEEP: [],
+            self.S_STOP_FACE_CHECK: [
                 Transition(
-                    "ACTIVE_TRACKING",
+                    self.S_ACTIVE_TRACKING,
                     lambda: not self.is_stop_face(),
                     lambda: self.start_tracking(),
                 ),
                 Transition(
-                    "STOP_TRACKING",
+                    self.S_STOP_TRACKING,
                     lambda: self.is_stop_face(),
                     lambda: self.stop_tracking(),
                 ),
             ],
-            "ACTIVE_TRACKING": [
-                Transition("UPLOAD_NEEDED", lambda: True, lambda: self.decide_upload()),
+            self.S_ACTIVE_TRACKING: [
+                Transition(self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()),
             ],
-            "STOP_TRACKING": [
-                Transition("UPLOAD_NEEDED", lambda: True, lambda: self.decide_upload()),
+            self.S_STOP_TRACKING: [
+                Transition(self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()),
             ],
-            "UPLOAD_NEEDED": [],
+            self.S_UPLOAD_NEEDED: [],
         }
 
     def is_stop_face(self):
@@ -772,7 +827,7 @@ class ActiveFSM(BaseFSM):
             # Check for out_margin and low battery
             if self.face_obj.orientation == "out_margin":
                 await self.face_obj.led.error_led(status=True, color_hex="#FF0000")
-            if read_battery_voltage(self.adc_vin)["adjusted_voltage_v"] < 3.3:
+            if read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)["adjusted_voltage_v"] < 3.3:
                 await self.face_obj.led.error_led(status=True, color_hex="#EC1169")
 
             if self.face_obj.orientation in ("front_cutout", "back_cutout"):
@@ -794,8 +849,14 @@ class ActiveFSM(BaseFSM):
         s.enable_low_power_dmp_motion_detection()
 
     async def start_ap_mode(self):
-        """USB face: soft_reset into early SoftAP gate (does not return on success)."""
-        dprint("AP mode: handoff via soft_reset...")
+        """USB face: finalize open sessions, save, then soft_reset into SoftAP."""
+        dprint("AP mode: finalize open sessions before soft_reset...")
+        orient = self.face_obj.orientation if self.face_obj else None
+        try:
+            # Item 1: never soft_reset while activity faces are still tracking.
+            await self.tracker.finalize_and_persist(active_orientation=orient)
+        except Exception as e:
+            dprint("AP mode: finalize failed:", e)
         with suppress(Exception):
             if self.face_obj and hasattr(self.face_obj, "led"):
                 await self.face_obj.led.inactive()
@@ -841,17 +902,19 @@ class ActiveFSM(BaseFSM):
             with suppress(asyncio.CancelledError):
                 await led.task
             led.task = None
-        if self.face_obj and self.tracker.active_face == self.face_obj.orientation:
-            if self.is_stop_face():
-                # True accumulating Fibonacci backoff while staying on stop face.
-                # Counter persists in RTC mem across deep sleeps.
-                # Only reset when we move to an active (non-stop) face.
-                base = self.config.running["settings"].get(
-                    "orientation_check_frequency", DEFAULT_SLEEP_TIME
-                )
-                backoff_s = apply_backoff(base, MAX_SLEEP_TIME)
-                self.sleep_ms = backoff_s * 1000
-                dprint(f"Stop face → accumulating backoff: {backoff_s}s")
+        if self.is_stop_face():
+            # Always finalize every open activity face on stop face, even when
+            # active_face still names the previous activity orientation.
+            base = self.config.running["settings"].get(
+                "orientation_check_frequency", DEFAULT_SLEEP_TIME
+            )
+            backoff_s = apply_backoff(base, MAX_SLEEP_TIME)
+            self.sleep_ms = backoff_s * 1000
+            dprint(f"Stop face → accumulating backoff: {backoff_s}s")
+            await self.tracker.stop_all()
+            if self.face_obj:
+                self.tracker.set_active_face(self.face_obj.orientation)
+        elif self.face_obj and self.tracker.active_face == self.face_obj.orientation:
             await self.tracker.stop_all()
         else:
             await self.start_tracking()
@@ -860,9 +923,9 @@ class ActiveFSM(BaseFSM):
         dprint("Deciding if upload is needed...")
 
         wdt_feed()
-        batt = read_battery_voltage(self.adc_vin)
+        batt = read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)
         usb_connected = batt["adjusted_voltage_v"] > USB_VOLTAGE_THRESHOLD
-        has_log = bool(self.tracker.running.get("tracking_log"))
+        has_log = self.tracker.tracking_log_nonempty()
         last_upload = self.tracker.running.get("last_config_uploaded", "")
         upload_freq = self.config.running["settings"].get(
             "upload_frequency", DEFAULT_UPLOAD_FRQ
@@ -892,7 +955,7 @@ class ActiveFSM(BaseFSM):
 
     async def run(self):
         await self.run_fsm()
-        if self.state == "DEEP_SLEEP":
+        if self.state == self.S_DEEP_SLEEP:
             await prepare_for_deep_sleep(
                 self.np_vcc,
                 self.np_obj,
@@ -913,6 +976,11 @@ class ActiveFSM(BaseFSM):
 # -- UploadFSM - upload + LED breathe + deepsleep --
 # --------------------------------------------------
 class UploadFSM(BaseFSM):
+    S_UPLOAD_NEEDED = "UPLOAD_NEEDED"
+    S_UPLOAD_DATA = "UPLOAD_DATA"
+    S_DISCONNECT = "DISCONNECT"
+    S_DEEP_SLEEP = "DEEP_SLEEP"
+
     def __init__(
         self, config, tracker, np_obj, adc_vin, np_vcc, token, headers, active_result
     ):
@@ -930,30 +998,30 @@ class UploadFSM(BaseFSM):
             if active_result["sleep_ms"]
             else DEFAULT_SLEEP_TIME
         )
-        self.state = "UPLOAD_NEEDED"
+        self.state = self.S_UPLOAD_NEEDED
 
         self.rules = {
-            "UPLOAD_NEEDED": [
+            self.S_UPLOAD_NEEDED: [
                 Transition(
-                    "UPLOAD_DATA",
+                    self.S_UPLOAD_DATA,
                     lambda: self.active_result["need_upload"],
                     lambda: self.do_upload(),
                 ),
-                Transition("DISCONNECT", lambda: True, lambda: self.skip_upload()),
+                Transition(self.S_DISCONNECT, lambda: True, lambda: self.skip_upload()),
             ],
-            "UPLOAD_DATA": [
+            self.S_UPLOAD_DATA: [
                 Transition(
-                    "DISCONNECT", lambda: self.is_connected, lambda: self.post_upload()
+                    self.S_DISCONNECT, lambda: self.is_connected, lambda: self.post_upload()
                 ),
                 # Offline / WiFi failed: still deep-sleep, keep local tracking_log
-                Transition("DISCONNECT", lambda: True, lambda: self.skip_upload()),
+                Transition(self.S_DISCONNECT, lambda: True, lambda: self.skip_upload()),
             ],
-            "DISCONNECT": [
+            self.S_DISCONNECT: [
                 Transition(
-                    "DEEP_SLEEP", lambda: True, lambda: self.cleanup_and_sleep()
+                    self.S_DEEP_SLEEP, lambda: True, lambda: self.cleanup_and_sleep()
                 ),
             ],
-            "DEEP_SLEEP": [],
+            self.S_DEEP_SLEEP: [],
         }
 
     async def do_upload(self):
@@ -964,7 +1032,7 @@ class UploadFSM(BaseFSM):
             self.is_connected = True
             # Deep-sleep wakes skip BootFSM NTP; refresh clock before upload
             await sync_time_if_possible()
-            batt_reading = read_battery_voltage(self.adc_vin)
+            batt_reading = read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)
             batt_reading.update(self.config.running["device"])
             await asyncio.sleep(2)
             wdt_feed()
@@ -1001,9 +1069,8 @@ class UploadFSM(BaseFSM):
 
             dprint("Uploading to the cloud....")
             data_to_remote = to_serializable(self.tracker.running)
-            # Remove ad-hoc hash advertisement keys so they don't pollute the persisted tracker state.
-            self.tracker.running.pop("config_hash", None)
-            self.tracker.running.pop("tracker_hash", None)
+            # Remove ad-hoc / ephemeral keys so they don't pollute NVS (item 4).
+            self.tracker.strip_ephemeral_keys()
             # Only apply when the server actually returned a face map (not local faces).
             if remote_config and remote_config.get("faces"):
                 self.tracker.apply_remote_config(remote_config)
@@ -1017,14 +1084,17 @@ class UploadFSM(BaseFSM):
                 )
                 if success:
                     dprint("-------------cleaning....")
-                    self.tracker.running.pop("calibration", None)
-                    self.tracker.running.pop("device", None)
+                    self.tracker.strip_ephemeral_keys()
                     self.tracker.upload_config(data_to_remote)
             except asyncio.TimeoutError:
                 dprint("Upload timed out")
+                # Still drop ephemeral keys so a failed upload cannot bloat NVS.
+                self.tracker.strip_ephemeral_keys()
+
 
     async def skip_upload(self):
         dprint("Skipping upload...")
+
 
     async def post_upload(self):
         dprint("Post-upload actions...")
@@ -1053,7 +1123,8 @@ class UploadFSM(BaseFSM):
             with suppress(asyncio.CancelledError):
                 await led.inactive()
 
-        # Persist state before power down
+        # Persist state before power down (strip ephemeral keys via Tracker.save).
+        self.tracker.strip_ephemeral_keys()
         self.tracker.apply(self.tracker.running)
         self.tracker.save()
 

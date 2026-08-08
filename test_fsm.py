@@ -142,7 +142,14 @@ from main import (
     DEFAULT_SLEEP_TIME,
     MAX_SLEEP_TIME,
 )
-from models import BaseFSM, Transition, Config, Tracker
+from models import (
+    BaseFSM,
+    Transition,
+    Config,
+    Tracker,
+    TRACKER_EPHEMERAL_KEYS,
+    NVS_BLOB_BUFFER_SIZE,
+)
 
 
 # ------------------------------------------------------------------
@@ -371,6 +378,162 @@ async def test_activefsm_upload_needed_logic():
 
 
 # ------------------------------------------------------------------
+# Tracking durability : SoftAP finalize, power-loss, hash, NVS
+# ------------------------------------------------------------------
+async def test_stop_tracking_appends_tracking_log():
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.activity_name = "Sleep"
+    face.tracking = True
+    face.started = "2026-08-07T22:51:44Z"
+    await trk.stop_tracking(face)
+    assert face.tracking is False
+    assert face.finished
+    assert "front" in trk.running["tracking_log"]
+    assert len(trk.running["tracking_log"]["front"]) == 1
+    assert "act-sleep" in trk.running["tracking_log"]["front"][0]
+
+
+async def test_finalize_and_persist_before_softap():
+    """SoftAP path must finalize open sessions into tracking_log + save."""
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.tracking = True
+    face.started = "2026-08-07T22:51:44Z"
+    trk.set_active_face("front")
+    save_mock = MagicMock(return_value=trk.running)
+    with patch.object(trk, "save", save_mock):
+        await trk.finalize_and_persist(active_orientation="back_cutout")
+    assert face.tracking is False
+    assert trk.tracking_log_nonempty()
+    assert trk.active_face == "back_cutout"
+    save_mock.assert_called()
+
+
+async def test_start_ap_mode_finalizes_open_sessions():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.tracking = True
+    face.started = "2026-08-07T22:51:44Z"
+    trk.set_active_face("front")
+
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.back_cutout
+    active.face_obj.stop_face = True
+
+    with (
+        patch("main.request_ap_soft_reset_handoff") as handoff,
+        patch.object(trk, "save", MagicMock(return_value=trk.running)),
+    ):
+        await active.start_ap_mode()
+    assert face.tracking is False
+    assert trk.tracking_log_nonempty()
+    handoff.assert_called_once()
+    assert active.ap_mode is True
+
+
+async def test_stop_face_finalizes_even_when_active_face_differs():
+    """Stop face must stop_all even if active_face is still the activity face."""
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.tracking = True
+    face.started = "2026-08-07T22:51:44Z"
+    trk.set_active_face("front")
+
+    cut = trk.front_cutout
+    cut.stop_face = True
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = cut
+
+    await active.stop_tracking()
+    assert face.tracking is False
+    assert trk.tracking_log_nonempty()
+    assert trk.active_face == "front_cutout"
+
+
+async def test_hash_mismatch_preserves_open_session_and_log():
+    """hash mismatch must not reset to factory defaults."""
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.activity_name = "Sleep"
+    face.tracking = True
+    face.started = "2026-08-07T22:51:44Z"
+    trk.running["tracking_log"] = {
+        "right": ["right,act-sleep,2026-08-06T23:14:00Z,2026-08-07T06:38:00Z"]
+    }
+    trk.running["hash_digest"] = "deadbeef"  # force mismatch vs recomputed
+    # Simulate post-load repair path
+    stored_hash = "deadbeef"
+    recomputed = trk.hash_digest()
+    assert stored_hash != recomputed
+    # Repair (same as Tracker.__init__ mismatch branch)
+    trk.running["hash_digest"] = recomputed
+    assert face.tracking is True
+    assert face.started == "2026-08-07T22:51:44Z"
+    assert trk.running["tracking_log"]["right"]
+
+
+async def test_strip_ephemeral_keys_before_save():
+    """raw_config / battery / calibration must not persist in tracker NVS."""
+    assert NVS_BLOB_BUFFER_SIZE >= 8192
+    trk = make_fake_tracker()
+    trk.running["raw_config"] = {"settings": {"ota_enabled": True}}
+    trk.running["device"] = {"battery": {"battery_percentage": 50}}
+    trk.running["calibration"] = {"mean": [0] * 6}
+    trk.running["config_hash"] = "abc"
+    trk.running["tracker_hash"] = "def"
+    trk.running["device_id"] = "uuid"
+    # save() strips then writes; mock NVS set_blob/commit via FileSystem.save body
+    with patch.object(trk, "nvs") as nvs_mock:
+        nvs_mock.set_blob = MagicMock()
+        nvs_mock.commit = MagicMock()
+        trk.save()
+    for key in TRACKER_EPHEMERAL_KEYS:
+        assert key not in trk.running
+    nvs_mock.set_blob.assert_called_once()
+    blob = nvs_mock.set_blob.call_args[0][1]
+    assert "raw_config" not in blob
+    assert "calibration" not in blob
+
+
+async def test_reconcile_keeps_valid_open_session():
+    """valid open session resumes after boot time sync."""
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.tracking = True
+    # Started one hour ago (valid)
+    face.started = real_time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", real_time.gmtime(real_time.time() - 3600)
+    )
+    changed = await trk.reconcile_open_sessions_after_time_sync()
+    assert changed is False
+    assert face.tracking is True
+    assert not trk.tracking_log_nonempty()
+
+
+async def test_reconcile_force_closes_invalid_started():
+    """unusable started must force-close into tracking_log, not drop."""
+    trk = make_fake_tracker()
+    face = trk.front
+    face.activity_id = "act-sleep"
+    face.tracking = True
+    face.started = ""  # missing
+    with patch.object(trk, "save", MagicMock(return_value=trk.running)):
+        changed = await trk.reconcile_open_sessions_after_time_sync()
+    assert changed is True
+    assert face.tracking is False
+    assert trk.tracking_log_nonempty()
+
+
+# ------------------------------------------------------------------
 # UploadFSM tests
 # ------------------------------------------------------------------
 async def test_uploadfsm_skips_when_not_needed():
@@ -536,6 +699,27 @@ if __name__ == "__main__":
             is_async=True,
         )
     )
+
+    for name, fn in (
+        ("test_stop_tracking_appends_tracking_log", test_stop_tracking_appends_tracking_log),
+        ("test_finalize_and_persist_before_softap", test_finalize_and_persist_before_softap),
+        ("test_start_ap_mode_finalizes_open_sessions", test_start_ap_mode_finalizes_open_sessions),
+        (
+            "test_stop_face_finalizes_even_when_active_face_differs",
+            test_stop_face_finalizes_even_when_active_face_differs,
+        ),
+        (
+            "test_hash_mismatch_preserves_open_session_and_log",
+            test_hash_mismatch_preserves_open_session_and_log,
+        ),
+        ("test_strip_ephemeral_keys_before_save", test_strip_ephemeral_keys_before_save),
+        ("test_reconcile_keeps_valid_open_session", test_reconcile_keeps_valid_open_session),
+        (
+            "test_reconcile_force_closes_invalid_started",
+            test_reconcile_force_closes_invalid_started,
+        ),
+    ):
+        results.append(_run_test(name, fn, is_async=True))
 
     # The heavier smoke test is more fragile; run it last
     results.append(

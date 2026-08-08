@@ -8,6 +8,21 @@ from rgb import FaceLEDNeoPixel
 from util import str_to_epoch, suppress, time_iso
 
 
+# NVS blob read buffer. Was 4000 and could fail-load near-full tracker JSON
+# (especially if ephemeral upload keys bloated the blob), wiping open sessions.
+NVS_BLOB_BUFFER_SIZE = 12288
+
+# Keys that may be attached for a single upload payload but must not stay in NVS.
+TRACKER_EPHEMERAL_KEYS = (
+    "raw_config",
+    "device",
+    "calibration",
+    "config_hash",
+    "tracker_hash",
+    "device_id",
+)
+
+
 def to_serializable(obj):
     """Recursively convert objects to JSON serializable format."""
     if isinstance(obj, Face):
@@ -54,7 +69,7 @@ class FileSystem:
         return self.startup
 
     def load(self):
-        buffer = bytearray(4000)
+        buffer = bytearray(NVS_BLOB_BUFFER_SIZE)
         try:
             size = self.nvs.get_blob(self._key, buffer)
             if size > 0:
@@ -163,7 +178,7 @@ class Config(FileSystem):
         self.apply(self.startup)
         if stored_hash and self.running.get("hash_digest") != stored_hash:
             print(
-                "WARN: Config hash mismatch on load (possible NVS corruption) — resetting"
+                "WARN: Config hash mismatch on load (possible NVS corruption) - resetting"
             )
             self.running = self.deepcopy(self.default)
             self.apply(self.running)
@@ -435,21 +450,40 @@ class Tracker(FileSystem):
     def __init__(self, np_obj):
         self.np_obj = np_obj
         super().__init__()
+        # Drop upload-only keys that may have been persisted by older firmware
+        # (must strip startup before apply, or they reappear in running).
+        if isinstance(self.startup, dict):
+            for key in TRACKER_EPHEMERAL_KEYS:
+                self.startup.pop(key, None)
+        self.strip_ephemeral_keys()
         # Integrity check using the assignment hash (see hash_digest for excluded transients).
         stored_hash = (self.startup or {}).get("hash_digest")
         self.apply(self.startup)
         self.parse_faces()
         if stored_hash and self.running.get("hash_digest") != stored_hash:
+            # Never wipe open sessions / tracking_log to factory defaults.
+            # Recompute hash from loaded assignment fields and keep runtime state.
             print(
-                "WARN: Tracker hash mismatch on load (possible NVS corruption) — resetting"
+                "WARN: Tracker hash mismatch on load - repairing hash, "
+                "preserving tracking_log and open sessions"
             )
-            self.running = self.deepcopy(self.default)
-            self.apply(self.running)
-            self.parse_faces()
+            self.running["hash_digest"] = self.hash_digest()
             self.save()
+
+    def strip_ephemeral_keys(self):
+        """Remove keys that belong in the upload payload only, not NVS."""
+        if not isinstance(self.running, dict):
+            return
+        for key in TRACKER_EPHEMERAL_KEYS:
+            self.running.pop(key, None)
+
+    def save(self):
+        self.strip_ephemeral_keys()
+        return FileSystem.save(self)
 
     def apply(self, config):
         self.running = self.deepcopy(config)
+        self.strip_ephemeral_keys()
         self.running["faces"] = [
             f
             if isinstance(f, Face)
@@ -481,6 +515,24 @@ class Tracker(FileSystem):
         for face in self.running["faces"]:
             setattr(self, face.orientation, face)
 
+    def tracking_log_nonempty(self):
+        log = self.running.get("tracking_log") or {}
+        if not isinstance(log, dict):
+            return bool(log)
+        for entries in log.values():
+            if entries:
+                return True
+        return False
+
+    def _face_duration_seconds(self, face):
+        """Return duration since face.started, or None if unusable."""
+        if not getattr(face, "started", None):
+            return None
+        try:
+            return time.time() - str_to_epoch(face.started)
+        except (ValueError, TypeError, OverflowError, OSError):
+            return None
+
     # This is to make sure we create ACL Anti Corruption Layer
     def apply_remote_config(self, config):
         for face in config["faces"]:
@@ -501,13 +553,24 @@ class Tracker(FileSystem):
     def set_active_face(self, face_name):
         self.active_face = self.running["active_face"] = face_name
 
-    async def stop_tracking(self, face):
+    async def stop_tracking(self, face, force_log=False, min_duration_s=60):
+        """
+        End tracking on one face and optionally append tracking_log.
+
+        force_log: used after power-loss / clock repair when we must not drop
+        a session even if duration math is awkward (still requires activity_id).
+        """
         if face.tracking:
             face.tracking = False
             face.finished = time_iso(time.localtime())
-            # Only log activities that lasted at least 1 minute
-            duration = time.time() - str_to_epoch(face.started)
-            if duration >= 60:
+            duration = self._face_duration_seconds(face)
+            should_log = False
+            if face.activity_id:
+                if force_log and face.started:
+                    should_log = True
+                elif duration is not None and duration >= min_duration_s:
+                    should_log = True
+            if should_log:
                 self.tracking_log(face)
         print("stopping: " + str(face))
         await face.led.inactive()
@@ -544,6 +607,56 @@ class Tracker(FileSystem):
                 face_log = self.running["tracking_log"][face.orientation]
             finally:
                 face_log.append(",".join(log_entry))
+
+    async def reconcile_open_sessions_after_time_sync(self):
+        """
+        After cold boot + NTP (or offline boot): never silently drop open sessions.
+
+        - Valid started (<= now + 2 min skew): keep tracking so a later stop face logs.
+        - Missing / unparseable / future started: force-close into tracking_log.
+        """
+        now = time.time()
+        changed = False
+        for face in self.running["faces"]:
+            if not face.tracking:
+                continue
+            duration = self._face_duration_seconds(face)
+            # Future start (clock was wrong when session opened) or unusable start.
+            if duration is None or duration < -120:
+                print(
+                    "WARN: open session on",
+                    face.orientation,
+                    "has invalid started; force-closing into tracking_log",
+                )
+                if not face.started:
+                    # Guarantee a start so the log line is well-formed.
+                    face.started = time_iso(time.localtime(int(now - 60)))
+                await self.stop_tracking(face, force_log=True, min_duration_s=0)
+                changed = True
+            else:
+                # Resume open session across power-loss / deep sleep.
+                print(
+                    "INFO: resuming open session on",
+                    face.orientation,
+                    "started",
+                    face.started,
+                )
+        if changed:
+            self.save()
+        return changed
+
+    async def finalize_and_persist(self, active_orientation=None):
+        """
+        Finalize all open faces into tracking_log and save to NVS.
+
+        Call before SoftAP soft_reset, and whenever leaving active tracking
+        without going through a normal stop path.
+        """
+        await self.stop_all()
+        if active_orientation:
+            self.set_active_face(active_orientation)
+        self.apply(self.running)
+        self.save()
 
     def upload_config(self, config):
         self.running["tracking_log"] = {}
