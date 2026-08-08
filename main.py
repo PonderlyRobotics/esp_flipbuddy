@@ -39,7 +39,6 @@ def _early_softap_gate():
     except Exception:
         pass
     try:
-        
         gc.collect()
         import ap_session
 
@@ -503,7 +502,9 @@ class BootFSM(BaseFSM):
                 ),
             ],
             self.S_SENSOR_INIT: [
-                Transition(self.S_WIFI_CONNECT, lambda: True, lambda: self.connect_wifi()),
+                Transition(
+                    self.S_WIFI_CONNECT, lambda: True, lambda: self.connect_wifi()
+                ),
             ],
             # Online: NTP + remote face map. Offline: keep Tracker defaults and continue.
             self.S_WIFI_CONNECT: [
@@ -527,16 +528,22 @@ class BootFSM(BaseFSM):
                 Transition(self.S_CALIBRATE, lambda: True, lambda: self.calibrate()),
             ],
             self.S_CALIBRATE: [
-                Transition(self.S_PARSE_FACES, lambda: True, lambda: self.parse_faces()),
+                Transition(
+                    self.S_PARSE_FACES, lambda: True, lambda: self.parse_faces()
+                ),
             ],
             self.S_PARSE_FACES: [
-                Transition(self.S_APPLY_REMOTE, lambda: True, lambda: self.apply_remote()),
+                Transition(
+                    self.S_APPLY_REMOTE, lambda: True, lambda: self.apply_remote()
+                ),
             ],
             self.S_APPLY_REMOTE: [
                 Transition(self.S_DISCONNECT, lambda: True, lambda: self.disconnect()),
             ],
             self.S_DISCONNECT: [
-                Transition(self.S_DEEP_SLEEP, lambda: True, lambda: self.enter_deep_sleep()),
+                Transition(
+                    self.S_DEEP_SLEEP, lambda: True, lambda: self.enter_deep_sleep()
+                ),
             ],
         }
         self.remote_config = None
@@ -549,7 +556,7 @@ class BootFSM(BaseFSM):
         cal_data = self.config.running.get("calibration", {})
         mean = cal_data.get("mean")
         stddev = cal_data.get("stddev")
-        
+
         # Only skip calibration if waking from deep sleep AND we have valid data.
         # Hard resets, power cycles, etc., should always re-calibrate.
         should_calibrate = True
@@ -562,10 +569,10 @@ class BootFSM(BaseFSM):
             scl_pin=SCL_PIN,
             intruppt_pin=INTERRUPT_PIN,
             calibrate=should_calibrate,
-            mean=mean,      # Pass existing data regardless
+            mean=mean,  # Pass existing data regardless
             stddev=stddev,
         )
-        
+
         if should_calibrate:
             dprint("INFO: Performing full sensor calibration...")
             s.upload_dmp_firmware()
@@ -578,7 +585,7 @@ class BootFSM(BaseFSM):
             dprint("INFO: Deep sleep wake. Using existing calibration data from NVS.")
 
         wdt_feed()
-        
+
     async def connect_wifi(self):
         dprint("Connecting to WiFi...")
         wdt_feed()
@@ -713,7 +720,9 @@ class ActiveFSM(BaseFSM):
                 )
             ],
             self.S_FACE_DETECT: [
-                Transition(self.S_FACE_CHECKED, lambda: True, lambda: self.detect_face()),
+                Transition(
+                    self.S_FACE_CHECKED, lambda: True, lambda: self.detect_face()
+                ),
             ],
             self.S_FACE_CHECKED: [
                 Transition(
@@ -753,10 +762,14 @@ class ActiveFSM(BaseFSM):
                 ),
             ],
             self.S_ACTIVE_TRACKING: [
-                Transition(self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()),
+                Transition(
+                    self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()
+                ),
             ],
             self.S_STOP_TRACKING: [
-                Transition(self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()),
+                Transition(
+                    self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()
+                ),
             ],
             self.S_UPLOAD_NEEDED: [],
         }
@@ -827,7 +840,12 @@ class ActiveFSM(BaseFSM):
             # Check for out_margin and low battery
             if self.face_obj.orientation == "out_margin":
                 await self.face_obj.led.error_led(status=True, color_hex="#FF0000")
-            if read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)["adjusted_voltage_v"] < 3.3:
+            if (
+                read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)[
+                    "adjusted_voltage_v"
+                ]
+                < 3.3
+            ):
                 await self.face_obj.led.error_led(status=True, color_hex="#EC1169")
 
             if self.face_obj.orientation in ("front_cutout", "back_cutout"):
@@ -1011,7 +1029,9 @@ class UploadFSM(BaseFSM):
             ],
             self.S_UPLOAD_DATA: [
                 Transition(
-                    self.S_DISCONNECT, lambda: self.is_connected, lambda: self.post_upload()
+                    self.S_DISCONNECT,
+                    lambda: self.is_connected,
+                    lambda: self.post_upload(),
                 ),
                 # Offline / WiFi failed: still deep-sleep, keep local tracking_log
                 Transition(self.S_DISCONNECT, lambda: True, lambda: self.skip_upload()),
@@ -1032,7 +1052,9 @@ class UploadFSM(BaseFSM):
             self.is_connected = True
             # Deep-sleep wakes skip BootFSM NTP; refresh clock before upload
             await sync_time_if_possible()
-            batt_reading = read_battery_voltage(self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY)
+            batt_reading = read_battery_voltage(
+                self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY
+            )
             batt_reading.update(self.config.running["device"])
             await asyncio.sleep(2)
             wdt_feed()
@@ -1091,10 +1113,8 @@ class UploadFSM(BaseFSM):
                 # Still drop ephemeral keys so a failed upload cannot bloat NVS.
                 self.tracker.strip_ephemeral_keys()
 
-
     async def skip_upload(self):
         dprint("Skipping upload...")
-
 
     async def post_upload(self):
         dprint("Post-upload actions...")

@@ -701,9 +701,18 @@ if __name__ == "__main__":
     )
 
     for name, fn in (
-        ("test_stop_tracking_appends_tracking_log", test_stop_tracking_appends_tracking_log),
-        ("test_finalize_and_persist_before_softap", test_finalize_and_persist_before_softap),
-        ("test_start_ap_mode_finalizes_open_sessions", test_start_ap_mode_finalizes_open_sessions),
+        (
+            "test_stop_tracking_appends_tracking_log",
+            test_stop_tracking_appends_tracking_log,
+        ),
+        (
+            "test_finalize_and_persist_before_softap",
+            test_finalize_and_persist_before_softap,
+        ),
+        (
+            "test_start_ap_mode_finalizes_open_sessions",
+            test_start_ap_mode_finalizes_open_sessions,
+        ),
         (
             "test_stop_face_finalizes_even_when_active_face_differs",
             test_stop_face_finalizes_even_when_active_face_differs,
@@ -712,8 +721,14 @@ if __name__ == "__main__":
             "test_hash_mismatch_preserves_open_session_and_log",
             test_hash_mismatch_preserves_open_session_and_log,
         ),
-        ("test_strip_ephemeral_keys_before_save", test_strip_ephemeral_keys_before_save),
-        ("test_reconcile_keeps_valid_open_session", test_reconcile_keeps_valid_open_session),
+        (
+            "test_strip_ephemeral_keys_before_save",
+            test_strip_ephemeral_keys_before_save,
+        ),
+        (
+            "test_reconcile_keeps_valid_open_session",
+            test_reconcile_keeps_valid_open_session,
+        ),
         (
             "test_reconcile_force_closes_invalid_started",
             test_reconcile_force_closes_invalid_started,
