@@ -139,19 +139,19 @@ If you have looked at photos or printed one already, you may think: this thing i
 
 What happens instead, after you grab, move, or tap the cube (accelerometer wake — not a quiet timer tick):
 
-1. **Assigned-face map (~7 s).** Every **flat** face that has an activity in the app lights in **that activity’s color** at once (one fade cycle, `7000` ms in `main.py`: `DEFAULT_INDICATOR_BLINK_DURATION`, `DEFAULT_INDICATOR_BLINK_CYCLE = 1`). You do not need to know if “Human Programming” is left or bottom. Green flashing and pointing up is enough. Orange is “AI shenanigans” for me. Whichever physical face that is does not matter.
-2. **Live preview (until it sits still).** After that map, keep rotating. As soon as an **assigned** activity face is upward, **only that face** lights solid in its activity color (previous preview off). Unassigned faces and the two cutouts do not get a preview LED. This is how you quickly hunt for a color without waiting for tracking to start.
-3. **Settle / commit (~10 s still).** The cube samples the MPU about **5 times per second**. A recognized face that stays still for **50 samples** (~**10 seconds**) is the face that starts (or stops) tracking. Motion, a new face, or “not quite on a face” resets the 10 s counter.
+1. **Assigned-face map (~7 s).** Every **flat** face that has an activity in the app lights in **that activity’s color** at once (one fade cycle). You do not need to know if “Human Programming” is left or bottom. Green flashing and pointing up is enough. Orange is “AI shenanigans” for me. Whichever physical face that is does not matter.
+2. **Live preview.** After that map, keep rotating. As soon as an **assigned** activity face is upward, **only that face** lights solid in its activity color (previous preview off). Unassigned faces and the two cutouts do not get a preview LED. This is how you quickly hunt for a color without waiting for tracking to start.
+3. **Still-hold (~10 s).** Hold that face still for about **10 seconds**. Motion, a new face, or “not quite on a face” restarts the 10 s. Then the cube does the **usual tracking blink** on that face, then upload if needed and/or deep sleep.
 4. **Give up (~40 s).** If you keep turning it and never hold a face for those 10 s, preview LEDs go out and this wake does **not** start tracking. Put it down and pick it up again.
 
-Quiet **timer** wakes (the cube already sitting on a face) skip steps 1–2: one orientation sample, then the usual track / SoftAP / sleep path.
+Quiet **timer** wakes (the cube already sitting on a face) skip the map and preview: one orientation sample, then the usual track / SoftAP / sleep path.
 
-| | Default | Where |
-|--|--|--|
-| Assigned-face map | **7 s**, one cycle, all faces that have an `activity_id` | `DEFAULT_INDICATOR_BLINK_DURATION` / `DEFAULT_INDICATOR_BLINK_CYCLE` in `main.py` |
-| Preview | Immediate solid color on the live **assigned** face | after the 7 s map, MPU wake only |
-| Still time to commit | **~10 s** (50 samples at 5 Hz) | `SETTLE_STABLE_SAMPLES` / `SETTLE_HZ` in `util.py` |
-| Preview timeout | **40 s** then skip tracking | `SETTLE_TIMEOUT_S` in `util.py` |
+| | Default |
+|--|--|
+| Assigned-face map | **~7 s**, one cycle, every assigned activity face |
+| Preview | Immediate solid color on the live **assigned** face (pickup wake only) |
+| Still time | **~10 s** wall-clock, then tracking blink |
+| Give up | **~40 s** of fidgeting, then skip tracking for this wake |
 
 ### SoftAP USB-face LEDs
 
@@ -179,11 +179,11 @@ See comments in `main.py` (`prepare_for_deep_sleep`) and `fsm.dot` for the assum
 
 ## Getting started
 
-Build and wire the cube first ([assembly section](#assembly-printing--bom) and the [PDF](./FlipBuddy%20Assembly%20guide.pdf)). Pins live in `main.py` / `mpu6050.py`.
+Build and wire the cube first ([assembly section](#assembly-printing-and-parts) and the [PDF](./FlipBuddy%20Assembly%20guide.pdf)). Pins live in `main.py` / `mpu6050.py`.
 
 | Path | Use when | What you put on the device |
 |------|----------|----------------------------|
-| [Fast track](#fast-track-v013) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
+| [Fast track](#fast-track-v015) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
 | [DIY path](#diy-path) | Other boards, or you want every `.py` on the filesystem | Stock MicroPython + all sources + credentials |
 
 ### Serial port and board (`justfile`)
@@ -255,7 +255,7 @@ just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
 }
 ```
 
-The firmware scans for visible SSIDs before connecting. For a hidden network, set `"hidden": true` on that entry.
+The firmware reconnects to the last successful AP when it can; otherwise it scans for visible SSIDs. For a hidden network, set `"hidden": true` on that entry.
 
 #### 3. Upload `main.py` and credentials
 
@@ -283,7 +283,7 @@ On first boot it will try Wi-Fi, calibrate, fetch face config, then track flips.
 
 For other boards, stock MicroPython, or editing modules on the filesystem.
 
-Get a MicroPython build for your chip and flash size from [micropython.org](https://micropython.org/download/) (1.27+ is a good match). Adjust `justfile` chip/port/flash size as needed.
+Get a MicroPython build for your chip and flash size from [micropython.org](https://micropython.org/download/) (**1.28** matches the Release image; 1.27+ usually works on the DIY path). Adjust `justfile` chip/port/flash size as needed.
 
 ```bash
 esptool --chip esp32s3 --port /dev/ttyACM0 erase-flash

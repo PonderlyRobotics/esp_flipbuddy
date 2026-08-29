@@ -4,7 +4,7 @@
 #
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
-#   2. just flash-firmware esp32_s3_flipbuddy_0.1.3.bin
+#   2. just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
 #   3. just fast-track   # main.py + credentials.json
 #   4. Power cycle the device.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
@@ -124,9 +124,9 @@ pull-nvs-state out=".":
 
 # Full erase + flash a firmware .bin (download frozen images from GitHub Releases first)
 [group("Device")]
-flash-firmware firmware="esp32_s3_flipbuddy_0.1.3.bin":
+flash-firmware firmware="esp32_s3_flipbuddy_0.1.5.bin":
     # Examples:
-    #   just flash-firmware esp32_s3_flipbuddy_0.1.3.bin   # from GitHub Releases
+    #   just flash-firmware esp32_s3_flipbuddy_0.1.5.bin   # from GitHub Releases
     #   just flash-firmware ESP32_GENERIC_S3-....bin       # stock MicroPython
     #
     # Frozen FlipBuddy images are on GitHub Releases (not committed). Verify .sha256 then flash.
