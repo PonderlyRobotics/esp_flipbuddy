@@ -3,8 +3,8 @@
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](./.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Hardware: CC BY--NC--SA 4.0](https://img.shields.io/badge/Hardware-CC%20BY--NC--SA%204.0-lightgrey.svg)](./LICENSE-HARDWARE)
-[![Release](https://img.shields.io/badge/release-v0.1.4-blue.svg)](./docs/CHANGELOG.md)
-[![MicroPython](https://img.shields.io/badge/MicroPython-1.27-2B2728.svg)](https://micropython.org/)
+[![Release](https://img.shields.io/badge/release-v0.1.5-blue.svg)](./docs/CHANGELOG.md)
+[![MicroPython](https://img.shields.io/badge/MicroPython-1.28-2B2728.svg)](https://micropython.org/)
 
 I kept forgetting to start and stop phone time trackers. FlipBuddy is my fix: a printed cube on the desk. Face up means that activity is on (not a countdown alarm). Flip when you switch; stop face when you are done. The cube logs face changes. LEDs show the colors you set in the free app at [flipbuddy.app](https://flipbuddy.app) if you use it.
 
@@ -13,7 +13,7 @@ I thought it would take a weekend. It took months. That is fine. Still a simple 
 Hackaday wrote about the project:  
 https://hackaday.com/2026/08/07/flipbuddy-is-borg-you-will-be-assimilated/
 
-This repository is the open DIY build. Firmware is **0.1.4**. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
+This repository is the open DIY build. Firmware tree is **0.1.5** (MicroPython **1.28** frozen set). The last published GitHub image is still **0.1.4** / MicroPython 1.27 until a 0.1.5 Release is cut. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
 <p align="center">
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
@@ -36,6 +36,7 @@ The design is for minutes and hours, not a stopwatch. It prefers boards you can 
 - [Features in short](#features-in-short)
 - [Day to day](#day-to-day)
 - [SoftAP maintenance mode](#softap-maintenance-mode)
+- [LEDs after you wake the cube](#leds-after-you-wake-the-cube)
 - [Battery (rough)](#battery-rough)
 - [Getting started](#getting-started)
   - [Serial port and board](#serial-port-and-board-justfile)
@@ -76,19 +77,20 @@ USB-C face up can open **SoftAP maintenance mode** (local captive portal — see
 
 When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
 
-Full SoftAP needs the portal modules on the device: the **0.1.4** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (open AP, cleartext HTTP, PIN): [SECURITY.md](./SECURITY.md).
+Full SoftAP needs the portal modules on the device: the **0.1.4** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
 
 | | |
 |--|--|
-| Join Wi‑Fi | Open network **`FlipBuddy`** (no AP password) |
+| Join Wi‑Fi | WPA2 **`FlipBuddy`**. Password = **`FB` + last 6 alphanumeric of `device_id`** (example ending `…8b5778` → `FB8B5778`). Independent of the portal PIN. |
 | Portal URL | [http://10.20.30.40/](http://10.20.30.40/) (captive portal usually opens this) |
 | Session length | About **5 minutes**, then SoftAP stops and the cube deep‑sleeps |
-| Transport | **HTTP only** (cleartext) |
+| Transport | **HTTP** on the encrypted radio (no TLS server) |
+| SoftAP LEDs | Solid **yellow** (`#FFFF00`) on the USB-face triad for the whole ~5 min session (see [LEDs](#leds-after-you-wake-the-cube)) |
 
 ### Builder steps
 
-1. Put the **USB‑C port face** up. Wait until the phone sees open Wi‑Fi **`FlipBuddy`** (shake to wake if the cube slept).
-2. Join **`FlipBuddy`**. If no captive browser popup, open **http://10.20.30.40/**.
+1. Put the **USB‑C port face** up. Wait until the phone sees Wi‑Fi **`FlipBuddy`** (shake to wake if the cube slept).
+2. Join **`FlipBuddy`** with the 8-character WPA2 password (`FB` + last 6 of `device_id`). Serial prints `SoftAP PSK=` if you have a USB console. If no captive browser popup, open **http://10.20.30.40/**.
 3. Unlock with the **setup PIN** (below) if you need to change Wi‑Fi or PIN.
 4. Save home SSID/password if needed. Keep **only one phone** on `FlipBuddy` while settings are unlocked ([why](./SECURITY.md#softap-captive-portal-http-pin-wi-fi)).
 5. **Exit:**
@@ -129,13 +131,39 @@ You can find `device_id` in the downloaded `credentials.json` or in the flipbudd
 
 `device_token` is never shown or edited on SoftAP. To replace API credentials, re‑upload `credentials.json` over USB (`just put-credentials` / `just fast-track`).
 
-### Which face is which?
+## LEDs after you wake the cube
 
-If you have looked at photos or printed one already, you may think: this thing is symmetric, so which side is front, left, or “programming”?
+The shell is symmetric on purpose. There is no emblem that says “this is front.” Color is the map.
 
-I could have put a different emblem, number, texture, or color on each face. I actually tried. My OCD did not approve of any of them.
+If you have looked at photos or printed one already, you may think: this thing is symmetric, so which side is front, left, or “programming”? I could have put a different emblem, number, texture, or color on each face. I actually tried. My OCD did not approve of any of them.
 
-So it works like this: when you grab, move, or tap the cube, the accelerometer wakes it and every face that has an activity lights up in that activity’s color. The lights stay on for a few seconds (about 5–7) and dim so you can see the map. I do not need to know if “Human Programming” is assigned to left or bottom. I only need it flashing green and pointing up. Orange is “AI shenanigans” for me. Whichever physical face that is does not matter. Color on top is enough.
+What happens instead, after you grab, move, or tap the cube (accelerometer wake — not a quiet timer tick):
+
+1. **Assigned-face map (~7 s).** Every **flat** face that has an activity in the app lights in **that activity’s color** at once (one fade cycle, `7000` ms in `main.py`: `DEFAULT_INDICATOR_BLINK_DURATION`, `DEFAULT_INDICATOR_BLINK_CYCLE = 1`). You do not need to know if “Human Programming” is left or bottom. Green flashing and pointing up is enough. Orange is “AI shenanigans” for me. Whichever physical face that is does not matter.
+2. **Live preview (until it sits still).** After that map, keep rotating. As soon as an **assigned** activity face is upward, **only that face** lights solid in its activity color (previous preview off). Unassigned faces and the two cutouts do not get a preview LED. This is how you quickly hunt for a color without waiting for tracking to start.
+3. **Settle / commit (~10 s still).** The cube samples the MPU about **5 times per second**. A recognized face that stays still for **50 samples** (~**10 seconds**) is the face that starts (or stops) tracking. Motion, a new face, or “not quite on a face” resets the 10 s counter.
+4. **Give up (~40 s).** If you keep turning it and never hold a face for those 10 s, preview LEDs go out and this wake does **not** start tracking. Put it down and pick it up again.
+
+Quiet **timer** wakes (the cube already sitting on a face) skip steps 1–2: one orientation sample, then the usual track / SoftAP / sleep path.
+
+| | Default | Where |
+|--|--|--|
+| Assigned-face map | **7 s**, one cycle, all faces that have an `activity_id` | `DEFAULT_INDICATOR_BLINK_DURATION` / `DEFAULT_INDICATOR_BLINK_CYCLE` in `main.py` |
+| Preview | Immediate solid color on the live **assigned** face | after the 7 s map, MPU wake only |
+| Still time to commit | **~10 s** (50 samples at 5 Hz) | `SETTLE_STABLE_SAMPLES` / `SETTLE_HZ` in `util.py` |
+| Preview timeout | **40 s** then skip tracking | `SETTLE_TIMEOUT_S` in `util.py` |
+
+### SoftAP USB-face LEDs
+
+When the **USB‑C port face** is up and SoftAP is running, the cube does **not** use activity colors for that session. It lights the **USB-cutout triad** solid **yellow** (`#FFFF00` — `SOFTAP_LED_COLOR` in `rgb.py`) for the whole ~5 minute portal:
+
+| Orientation | LEDs (activity-face names) | DIN index |
+|-------------|----------------------------|-----------|
+| USB face (`back_cutout`) | top, right, front | 4, 5, 0 |
+
+That is the same triad as the 0.1.3 back-cutout blink map. The opposite cutout (stop / `front_cutout`) is bottom, left, back (DIN 1, 3, 2) and is not used for SoftAP.
+
+Yellow stays on after the portal LED self-test as well, so you can still see “maintenance is up.” Set `ENABLE_SOFTAP_INDICATOR = False` in `rgb.py` (frozen image: rebuild) if you want SoftAP with the strip dark.
 
 ## Battery (rough)
 

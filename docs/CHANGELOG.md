@@ -2,6 +2,18 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.1.5 (2026-08-29)
+
+Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050 + ADC.
+
+- **Last-AP fast reconnect:** remember the last successful STA AP (NVS `lastap`); skip the extra scan; fail-fast when the AP is gone; no 2 s post-IP sleep
+- **SoftAP WPA2-PSK:** join password `FB` + last 6 alnum of `device_id`; portal remains `http://10.20.30.40/`
+- **SoftAP USB-face LEDs:** solid yellow (`#FFFF00`) on the back-cutout triad (top / right / front)
+- **Live face preview:** after the 7 s assigned-face map, MPU6050 5 Hz preview until ~10 s still (or 40 s timeout)
+- **Frozen 1.28 image:** includes `ap_session` and the current helpers
+
+Local frozen image (not a GitHub Release yet): `build/esp32_s3_flipbuddy_0.1.5.bin` (IDF 5.5.1). Last published GitHub image remains `esp32_s3_flipbuddy_0.1.4.bin` (MicroPython 1.27).
+
 ## 0.1.4 (2026-08-08)
 
 Maintenance release with internal firmware optimizations for memory and stability.
