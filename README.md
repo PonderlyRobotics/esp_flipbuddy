@@ -159,9 +159,9 @@ When the **USB‑C port face** is up and SoftAP is running, the cube does **not*
 
 | Orientation | LEDs (activity-face names) | DIN index |
 |-------------|----------------------------|-----------|
-| USB face (`back_cutout`) | top, right, front | 4, 5, 0 |
+| USB face (`back_cutout`) | left, back, bottom | 3, 2, 1 |
 
-That is the same triad as the 0.1.3 back-cutout blink map. The opposite cutout (stop / `front_cutout`) is bottom, left, back (DIN 1, 3, 2) and is not used for SoftAP.
+The opposite cutout (stop / `front_cutout`) is right, top, front (DIN 5, 4, 0) and is not used for SoftAP.
 
 Yellow stays on after the portal LED self-test as well, so you can still see “maintenance is up.” Set `ENABLE_SOFTAP_INDICATOR = False` in `rgb.py` (frozen image: rebuild) if you want SoftAP with the strip dark.
 

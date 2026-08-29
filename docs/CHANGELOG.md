@@ -8,7 +8,8 @@ Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050
 
 - **Last-AP fast reconnect:** remember the last successful STA AP (NVS `lastap`); skip the extra scan; fail-fast when the AP is gone; no 2 s post-IP sleep
 - **SoftAP WPA2-PSK:** join password `FB` + last 6 alnum of `device_id`; portal remains `http://10.20.30.40/`
-- **SoftAP USB-face LEDs:** solid yellow (`#FFFF00`) on the back-cutout triad (top / right / front)
+- **SoftAP USB-face LEDs:** solid yellow (`#FFFF00`) on the back-cutout triad (left / back / bottom)
+- **Cutout triad:** `front_cutout` is right/top/front; `back_cutout` is left/back/bottom (physical corners; 0.1.3 map was swapped)
 - **Live face preview:** after the 7 s assigned-face map, MPU6050 5 Hz preview until ~10 s still (or 40 s timeout)
 - **Frozen 1.28 image:** includes `ap_session` and the current helpers
 

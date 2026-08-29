@@ -22,13 +22,13 @@ class _NP:
 
 
 def test_back_cutout_triad_static_is_yellow_on_usb_cutout_leds():
-    """USB face is back_cutout; 0.1.3 DIY triad is top / right / front."""
+    """USB face is back_cutout: left / back / bottom."""
     np = _NP()
     rgb.set_cutout_triad_static(np, "back_cutout", "#FFFF00")
     on = {
-        pinout["top"]["led"],
-        pinout["right"]["led"],
-        pinout["front"]["led"],
+        pinout["left"]["led"],
+        pinout["back"]["led"],
+        pinout["bottom"]["led"],
     }
     assert np.wrote is True
     for i in range(6):
@@ -42,10 +42,10 @@ def test_back_cutout_triad_static_is_yellow_on_usb_cutout_leds():
 def test_front_cutout_triad_does_not_light_back_cutout_leds():
     np = _NP()
     rgb.set_cutout_triad_static(np, "front_cutout", "#FFFF00")
-    assert np[pinout["top"]["led"]] == (0, 0, 0)
-    assert np[pinout["right"]["led"]] == (0, 0, 0)
-    assert np[pinout["front"]["led"]] == (0, 0, 0)
-    assert np[pinout["left"]["led"]] != (0, 0, 0)
+    assert np[pinout["left"]["led"]] == (0, 0, 0)
+    assert np[pinout["back"]["led"]] == (0, 0, 0)
+    assert np[pinout["bottom"]["led"]] == (0, 0, 0)
+    assert np[pinout["right"]["led"]] != (0, 0, 0)
 
 
 def test_softap_indicator_disabled_is_noop():

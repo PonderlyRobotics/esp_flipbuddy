@@ -19,10 +19,9 @@ pinout = {
 }
 
 # USB / stop-cutout indicator: three activity-face LEDs around the cutout.
-# Super Mini 0.1.3 mapping (front_cutout vs back_cutout).
 TRIAD_FACES = {
-    "front_cutout": ("bottom", "left", "back"),
-    "back_cutout": ("top", "right", "front"),
+    "front_cutout": ("right", "top", "front"),
+    "back_cutout": ("left", "back", "bottom"),
 }
 ENABLE_SOFTAP_INDICATOR = True
 SOFTAP_LED_COLOR = "#FFFF00"

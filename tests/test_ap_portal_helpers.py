@@ -91,7 +91,7 @@ def test_show_softap_leds_lights_back_cutout_yellow():
     fsm.show_softap_leds()
     from rgb import pinout
 
-    on = {pinout["top"]["led"], pinout["right"]["led"], pinout["front"]["led"]}
+    on = {pinout["left"]["led"], pinout["back"]["led"], pinout["bottom"]["led"]}
     for i in range(6):
         color = np[i]
         if i in on:
