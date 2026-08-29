@@ -489,6 +489,46 @@ async def test_activefsm_settle_timeout_skips_tracking_without_error():
     trk.out_margin.led.error_led.assert_not_called()
 
 
+async def test_detect_face_reuses_mpu_from_settle():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.front
+    mpu = MagicMock()
+    mpu._int_pin = MagicMock()
+    active._mpu = mpu
+    with (
+        patch("main.sensor_init") as si,
+        patch("main.esp32.wake_on_ext0"),
+        patch(
+            "main.read_battery_voltage",
+            return_value={"adjusted_voltage_v": 3.7},
+        ),
+        patch("main.clear_ap_cooldown"),
+        patch("main.wdt_feed"),
+    ):
+        await active.detect_face()
+    si.assert_not_called()
+    mpu.enable_low_power_dmp_motion_detection.assert_called()
+
+
+async def test_start_tracking_clears_preview_then_blinks():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front.activity_id = "act-sleep"
+    trk.front.led.inactive = AsyncMock()
+    trk.front.led.active = MagicMock()
+    trk.front.led.get_total_blink_time = MagicMock(return_value=0)
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.front
+    active._preview_face = trk.front
+    with patch("main.wdt_feed"), patch("main.reset_backoff"):
+        await active.start_tracking()
+    trk.front.led.inactive.assert_awaited()
+    trk.front.led.active.assert_called()
+    assert active._preview_face is None
+
+
 # ------------------------------------------------------------------
 # Tracking durability : SoftAP finalize, power-loss, hash, NVS
 # ------------------------------------------------------------------
@@ -829,6 +869,20 @@ if __name__ == "__main__":
         _run_test(
             "test_activefsm_settle_timeout_skips_tracking_without_error",
             test_activefsm_settle_timeout_skips_tracking_without_error,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_detect_face_reuses_mpu_from_settle",
+            test_detect_face_reuses_mpu_from_settle,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_start_tracking_clears_preview_then_blinks",
+            test_start_tracking_clears_preview_then_blinks,
             is_async=True,
         )
     )

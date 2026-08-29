@@ -719,6 +719,7 @@ class ActiveFSM(BaseFSM):
         self.state = self.S_FACE_INDICATOR
         self.face_obj = None
         self._preview_face = None
+        self._mpu = None
         self.sleep_ms = (
             self.config.running["settings"].get(
                 "orientation_check_frequency", DEFAULT_SLEEP_TIME
@@ -876,6 +877,10 @@ class ActiveFSM(BaseFSM):
             scl_pin=SCL_PIN,
             intruppt_pin=INTERRUPT_PIN,
         )
+        self._mpu = s
+        # Gyro IRQ also reads I2C; stop it so settle samples are not delayed.
+        with suppress(Exception):
+            s.irq_stop()
         if wake_reason() != PIN_WAKE:
             _accel, face = _read_mpu_settle(s)
             self.face_obj = self._face_from_name(face)
@@ -887,6 +892,7 @@ class ActiveFSM(BaseFSM):
         max_samples = SETTLE_HZ * SETTLE_TIMEOUT_S
         period_ms = 1000 // SETTLE_HZ
         for _ in range(max_samples):
+            t0 = time.ticks_ms()
             wdt_feed()
             accel, face = _read_mpu_settle(s)
             step = settle_step(prev_accel, accel, face, prev_face, stable_count)
@@ -899,7 +905,10 @@ class ActiveFSM(BaseFSM):
                 self.face_obj = self._face_from_name(step["face"])
                 dprint("ActiveFSM settle →", step["face"])
                 return
-            await asyncio.sleep_ms(period_ms)
+            elapsed = time.ticks_diff(time.ticks_ms(), t0)
+            remain = period_ms - elapsed
+            if remain > 0:
+                await asyncio.sleep_ms(remain)
 
         dprint("ActiveFSM settle timeout — skip tracking")
         await self._clear_preview()
@@ -908,15 +917,18 @@ class ActiveFSM(BaseFSM):
     async def detect_face(self):
         dprint("Detecting upward face...")
         self.np_vcc.on()
-        s = sensor_init(
-            enable_mpu=True,
-            calibrate=False,
-            mean=self.config.running["calibration"]["mean"],
-            stddev=self.config.running["calibration"]["stddev"],
-            sda_pin=SDA_PIN,
-            scl_pin=SCL_PIN,
-            intruppt_pin=INTERRUPT_PIN,
-        )
+        s = self._mpu
+        if s is None:
+            s = sensor_init(
+                enable_mpu=True,
+                calibrate=False,
+                mean=self.config.running["calibration"]["mean"],
+                stddev=self.config.running["calibration"]["stddev"],
+                sda_pin=SDA_PIN,
+                scl_pin=SCL_PIN,
+                intruppt_pin=INTERRUPT_PIN,
+            )
+            self._mpu = s
         esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
         await asyncio.sleep(0.1)
         if self.face_obj is None:
@@ -992,7 +1004,8 @@ class ActiveFSM(BaseFSM):
         dprint(self.face_obj)
         if self.face_obj:
             await self.tracker.start_tracking(self.face_obj)
-            # Activate LED - background task handles blinking
+            # Preview left a solid LED; drop it so tracking blink actually starts.
+            await self._clear_preview()
             self.face_obj.led.active()
             t = self.face_obj.led.get_total_blink_time()
             await asyncio.sleep(t * 2)  # two cycles
