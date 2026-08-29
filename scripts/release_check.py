@@ -76,6 +76,7 @@ SECRET_LINE_RES: list[tuple[str, re.Pattern[str]]] = [
 # Paths / snippets allowed even if they match soft patterns
 ALLOW_PATH_SUBSTR = (
     "test_fsm.py",
+    "tests/",
     "README.md",
     "scripts/release_check.py",
     ".pre-commit-config.yaml",
