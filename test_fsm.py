@@ -355,10 +355,13 @@ async def test_activefsm_face_indicator_to_detect():
     # Force the first transition
     active.state = "FACE_INDICATOR"
     # The transition action is show_face_indicator (now fixed name)
-    # We just check that the rule exists and leads to FACE_DETECT
+    # PIN_WAKE then live-settles at 5 Hz before FACE_DETECT
     transitions = active.rules.get("FACE_INDICATOR", [])
     assert len(transitions) == 1
-    assert transitions[0].next_state == "FACE_DETECT"
+    assert transitions[0].next_state == "FACE_SETTLE"
+    settle = active.rules.get("FACE_SETTLE", [])
+    assert len(settle) == 1
+    assert settle[0].next_state == "FACE_DETECT"
 
 
 async def test_activefsm_upload_needed_logic():
@@ -375,6 +378,115 @@ async def test_activefsm_upload_needed_logic():
     # Directly invoke the decision (it sets self.need_upload)
     await active.decide_upload()
     assert active.need_upload is True
+
+
+def _patch_settle_hw(wake=None, samples=None):
+    """Patch ActiveFSM settle: wake reason, MPU sample helper, sleep, WDT."""
+    if wake is None:
+        wake = main.PIN_WAKE
+    seq = list(samples or [((0.0, 1.0, 0.0), "front")])
+
+    def _next(*_a, **_k):
+        if seq:
+            return seq.pop(0)
+        return ((0.0, 1.0, 0.0), "front")
+
+    return (
+        patch("main.wake_reason", return_value=wake),
+        patch("main.sensor_init", return_value=MagicMock()),
+        patch("main._read_mpu_settle", side_effect=_next),
+        patch("main.wdt_feed"),
+        patch("main.asyncio.sleep_ms", new_callable=AsyncMock, create=True),
+    )
+
+
+async def test_activefsm_settle_timer_wake_is_single_sample():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    patches = _patch_settle_hw(wake=0, samples=[((0.0, 1.0, 0.0), "front")])
+    with patches[0], patches[1], patches[2], patches[3], patches[4] as sleep_ms:
+        await active.settle_face()
+    assert active.face_obj is trk.front
+    sleep_ms.assert_not_called()
+
+
+async def test_activefsm_settle_commits_assigned_face_after_fifty_samples():
+    from util import SETTLE_STABLE_SAMPLES
+
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front.activity_id = "act-sleep"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    n = SETTLE_STABLE_SAMPLES
+    samples = [((0.0, 1.0, 0.0), "front")] * n
+    patches = _patch_settle_hw(samples=samples)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        await active.settle_face()
+    assert active.face_obj is trk.front
+    assert trk.front.led.status == "ACTIVE"
+
+
+async def test_activefsm_settle_rotation_switches_preview_led():
+    from util import SETTLE_STABLE_SAMPLES
+
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front.activity_id = "act-sleep"
+    trk.right.activity_id = "act-work"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    samples = [((0.0, 1.0, 0.0), "front")] * 2 + [
+        ((0.0, 0.0, -1.0), "right")
+    ] * SETTLE_STABLE_SAMPLES
+    patches = _patch_settle_hw(samples=samples)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        await active.settle_face()
+    assert active.face_obj is trk.right
+    assert trk.right.led.status == "ACTIVE"
+    assert trk.front.led.status == "INACTIVE"
+
+
+async def test_activefsm_settle_out_margin_does_not_error():
+    from util import SETTLE_STABLE_SAMPLES
+
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front.activity_id = "act-sleep"
+    trk.out_margin.led.error_led = AsyncMock()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    samples = [
+        ((0.0, 1.0, 0.0), "front"),
+        ((0.0, 0.0, 0.0), "out_margin"),
+        ((0.0, 0.0, 0.0), "out_margin"),
+    ] + [((0.0, 1.0, 0.0), "front")] * SETTLE_STABLE_SAMPLES
+    patches = _patch_settle_hw(samples=samples)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        await active.settle_face()
+    trk.out_margin.led.error_led.assert_not_called()
+    assert active.face_obj is trk.front
+
+
+async def test_activefsm_settle_timeout_skips_tracking_without_error():
+    from util import SETTLE_HZ
+
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.out_margin.led.error_led = AsyncMock()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    n = SETTLE_HZ * 1 + 2
+    samples = [((0.0, 0.0, 0.0), "out_margin")] * n
+    patches = _patch_settle_hw(samples=samples)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patch("main.SETTLE_TIMEOUT_S", 1),
+    ):
+        await active.settle_face()
+    assert active.face_obj is None
+    trk.out_margin.led.error_led.assert_not_called()
 
 
 # ------------------------------------------------------------------
@@ -682,6 +794,41 @@ if __name__ == "__main__":
         _run_test(
             "test_activefsm_face_indicator_to_detect",
             test_activefsm_face_indicator_to_detect,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_activefsm_settle_timer_wake_is_single_sample",
+            test_activefsm_settle_timer_wake_is_single_sample,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_activefsm_settle_commits_assigned_face_after_fifty_samples",
+            test_activefsm_settle_commits_assigned_face_after_fifty_samples,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_activefsm_settle_rotation_switches_preview_led",
+            test_activefsm_settle_rotation_switches_preview_led,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_activefsm_settle_out_margin_does_not_error",
+            test_activefsm_settle_out_margin_does_not_error,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_activefsm_settle_timeout_skips_tracking_without_error",
+            test_activefsm_settle_timeout_skips_tracking_without_error,
             is_async=True,
         )
     )

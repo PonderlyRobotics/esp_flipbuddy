@@ -85,7 +85,7 @@ from machine import (
 )
 from micropython import const
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
-from mpu6050 import cube_face_upward, sensor_init
+from mpu6050 import cube_face_upward, sample_face_accel, sensor_init
 from network_helper import (
     async_do_connect,
     release_sta,
@@ -94,7 +94,16 @@ from network_helper import (
 )
 import network_helper
 from ntptime import settime as ntp_settime
-from util import read_battery_voltage, rgb_self_test, str_to_epoch, suppress, time_iso
+from util import (
+    SETTLE_HZ,
+    SETTLE_TIMEOUT_S,
+    read_battery_voltage,
+    rgb_self_test,
+    settle_step,
+    str_to_epoch,
+    suppress,
+    time_iso,
+)
 
 # 240Mhz Note: Going lower cause led flicker due to software based async execution
 freq(240000000)
@@ -138,6 +147,11 @@ def dprint(*args, **kwargs):
     """Debug print that can be disabled. All other prints in main.py were converted to this."""
     if DEBUG:
         print(*args, **kwargs)
+
+
+def _read_mpu_settle(sensor):
+    """One MPU sample for live settle: ((x, y, z) in g, face name)."""
+    return sample_face_accel(sensor)
 
 
 # ----------------------------------
@@ -308,17 +322,18 @@ def reset_backoff(default_sleep_time):
     rtc_mem.memory(f"0,{default_sleep_time}".encode())
 
 
-async def wait_for_connection(retry_interval=1.0, max_attempts=4):
+async def wait_for_connection(retry_interval=0.3, max_attempts=2):
     """Asynchronously wait for WiFi connection with retries.
 
     If credentials are missing, do not retry. Empty scan still attempts connect
     (radio may not be ready yet); only explicit no_creds aborts early.
+    First attempt uses last-AP fast reconnect; the second is scan fallback.
     """
     attempts = 0
     try:
         while attempts < max_attempts:
             wdt_feed()
-            if await async_do_connect(timeout=10):
+            if await async_do_connect(timeout=5):
                 return True
             # no_creds: nothing to try. no_ssid after empty scan is no longer terminal
             # (network_helper falls back to trying configured SSIDs).
@@ -633,8 +648,6 @@ class BootFSM(BaseFSM):
     async def fetch_config(self):
         dprint("Fetching remote config...")
         wdt_feed()
-        await asyncio.sleep(2)
-        wdt_feed()
         self.remote_config = await get_remote_config()
         if self.remote_config:
             # Only apply + save if the meaningful settings actually changed.
@@ -687,6 +700,7 @@ class BootFSM(BaseFSM):
 # -------------------------------------------
 class ActiveFSM(BaseFSM):
     S_FACE_INDICATOR = "FACE_INDICATOR"
+    S_FACE_SETTLE = "FACE_SETTLE"
     S_FACE_DETECT = "FACE_DETECT"
     S_FACE_CHECKED = "FACE_CHECKED"
     S_AP_MODE = "AP_MODE"
@@ -704,6 +718,7 @@ class ActiveFSM(BaseFSM):
         self.np_vcc = np_vcc
         self.state = self.S_FACE_INDICATOR
         self.face_obj = None
+        self._preview_face = None
         self.sleep_ms = (
             self.config.running["settings"].get(
                 "orientation_check_frequency", DEFAULT_SLEEP_TIME
@@ -716,8 +731,13 @@ class ActiveFSM(BaseFSM):
         self.rules = {
             self.S_FACE_INDICATOR: [
                 Transition(
-                    self.S_FACE_DETECT, lambda: True, lambda: self.show_face_indicator()
+                    self.S_FACE_SETTLE, lambda: True, lambda: self.show_face_indicator()
                 )
+            ],
+            self.S_FACE_SETTLE: [
+                Transition(
+                    self.S_FACE_DETECT, lambda: True, lambda: self.settle_face()
+                ),
             ],
             self.S_FACE_DETECT: [
                 Transition(
@@ -812,6 +832,79 @@ class ActiveFSM(BaseFSM):
             with suppress(asyncio.CancelledError):
                 await ref_face.led.inactive()
 
+    def _face_from_name(self, face_name):
+        if not face_name or face_name in ("out_margin", "unknown"):
+            return None
+        return getattr(self.tracker, face_name, None)
+
+    async def _preview_switch(self, face_name):
+        """Light one assigned activity RGB; previous off. No errors, no tracking."""
+        if face_name not in FACES:
+            return
+        face = getattr(self.tracker, face_name, None)
+        if face is None or not face.activity_id:
+            return
+        if self._preview_face is face:
+            return
+        if self._preview_face is not None:
+            with suppress(asyncio.CancelledError):
+                await self._preview_face.led.inactive()
+        self._preview_face = face
+        led = face.led
+        led.status = "ACTIVE"
+        led.set_static_color()
+
+    async def _clear_preview(self):
+        if self._preview_face is not None:
+            with suppress(asyncio.CancelledError):
+                await self._preview_face.led.inactive()
+            self._preview_face = None
+
+    async def settle_face(self):
+        """After the 7s show: 5 Hz MPU preview, commit when a face holds 50 samples.
+
+        Timer wakes skip the loop (one sample). PIN_WAKE does not error on
+        out_margin. Tracking / SoftAP / error LEDs wait until FACE_DETECT.
+        """
+        self.np_vcc.on()
+        s = sensor_init(
+            enable_mpu=True,
+            calibrate=False,
+            mean=self.config.running["calibration"]["mean"],
+            stddev=self.config.running["calibration"]["stddev"],
+            sda_pin=SDA_PIN,
+            scl_pin=SCL_PIN,
+            intruppt_pin=INTERRUPT_PIN,
+        )
+        if wake_reason() != PIN_WAKE:
+            _accel, face = _read_mpu_settle(s)
+            self.face_obj = self._face_from_name(face)
+            return
+
+        prev_accel = None
+        prev_face = None
+        stable_count = 0
+        max_samples = SETTLE_HZ * SETTLE_TIMEOUT_S
+        period_ms = 1000 // SETTLE_HZ
+        for _ in range(max_samples):
+            wdt_feed()
+            accel, face = _read_mpu_settle(s)
+            step = settle_step(prev_accel, accel, face, prev_face, stable_count)
+            prev_accel = accel
+            prev_face = step["face"]
+            stable_count = step["stable_count"]
+            if step["face"] != "out_margin":
+                await self._preview_switch(step["face"])
+            if step["committed"]:
+                self.face_obj = self._face_from_name(step["face"])
+                dprint("ActiveFSM settle →", step["face"])
+                return
+            await asyncio.sleep_ms(period_ms)
+
+        dprint("ActiveFSM settle timeout — skip tracking")
+        await self._clear_preview()
+        self.face_obj = None
+
     async def detect_face(self):
         dprint("Detecting upward face...")
         self.np_vcc.on()
@@ -826,9 +919,12 @@ class ActiveFSM(BaseFSM):
         )
         esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
         await asyncio.sleep(0.1)
-        face_name = cube_face_upward(s)
-        dprint(f"ActiveFSM → face: {face_name}")
-        self.face_obj = getattr(self.tracker, face_name, None)
+        if self.face_obj is None:
+            face_name = cube_face_upward(s)
+            dprint(f"ActiveFSM → face: {face_name}")
+            self.face_obj = getattr(self.tracker, face_name, None)
+        else:
+            dprint(f"ActiveFSM → settled face: {self.face_obj.orientation}")
         # Leaving USB face clears AP one-shot cooldown so next USB placement works
         if not self.face_obj or self.face_obj.orientation != "back_cutout":
             clear_ap_cooldown()
@@ -1056,7 +1152,6 @@ class UploadFSM(BaseFSM):
                 self.adc_vin, capacity_mah=DEFAULT_BAT_CAPACITY
             )
             batt_reading.update(self.config.running["device"])
-            await asyncio.sleep(2)
             wdt_feed()
             remote_config = await get_remote_config()
             if remote_config:

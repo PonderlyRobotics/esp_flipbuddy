@@ -1,4 +1,61 @@
+from math import sqrt
+
 import utime as time
+
+SETTLE_HZ = 5
+SETTLE_STABLE_SAMPLES = 50  # 10 s still at 5 Hz
+SETTLE_MOVE_G = 0.16  # Euclidean delta in g; motion restarts the dwell counter
+SETTLE_TIMEOUT_S = 40  # headroom for rotation before the 10 s hold
+
+
+def accel_delta(prev, new):
+    """Euclidean distance between two accel triples in g. Missing samples are 0."""
+    if prev is None or new is None:
+        return 0.0
+    dx = new[0] - prev[0]
+    dy = new[1] - prev[1]
+    dz = new[2] - prev[2]
+    return sqrt(dx * dx + dy * dy + dz * dz)
+
+
+def settle_step(
+    prev_accel,
+    new_accel,
+    new_face,
+    prev_face,
+    stable_count,
+    needed=SETTLE_STABLE_SAMPLES,
+    move_g=SETTLE_MOVE_G,
+):
+    """One 5 Hz sample of live face-settle / preview (MPU6050).
+
+    `new_face` comes from mpu6050.cube_face_upward (or tests). Motion (new
+    face, out_margin/unknown, or raw delta above move_g) restarts the dwell
+    counter. A recognized activity face is committed after `needed`
+    consecutive still samples. out_margin never commits.
+    """
+    if new_accel is None or new_face in (None, "out_margin", "unknown"):
+        return {
+            "face": "out_margin",
+            "moved": True,
+            "stable_count": 0,
+            "committed": False,
+        }
+    moved = (
+        prev_accel is None
+        or new_face != prev_face
+        or accel_delta(prev_accel, new_accel) > move_g
+    )
+    if moved:
+        count = 1
+    else:
+        count = stable_count + 1
+    return {
+        "face": new_face,
+        "moved": moved,
+        "stable_count": count,
+        "committed": count >= needed,
+    }
 
 
 class suppress:

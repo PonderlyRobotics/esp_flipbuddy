@@ -517,6 +517,37 @@ class MPU6050:
         print("✅ MPU6050 has been reset!")
 
 
+def face_from_tilt(
+    tilt_x,
+    tilt_y,
+    tilt_z,
+    x,
+    y,
+    z,
+    roll,
+    pitch,
+    margin=0.2,
+    angle_margin=10,
+):
+    """Classify upward face from one MPU tilt_refin() sample (g + roll/pitch)."""
+    if (115 <= roll <= 145) and (-50 <= pitch <= -30):
+        return "back_cutout"
+    if (-60 <= roll <= -20) and (20 <= pitch <= 40):
+        return "front_cutout"
+    # Renamed faces: back→front, left→bottom, front→back, bottom→left, right→top, top→right
+    if -margin <= x <= margin and -margin <= y <= margin:
+        return "left" if z > 0 else "right"
+    if -margin <= y <= margin and -margin <= z <= margin:
+        return "bottom" if x > 0 else "top"
+    if -margin <= x <= margin and -margin <= z <= margin:
+        return "front" if y > 0 else "back"
+    if abs(tilt_x) > 90 or abs(tilt_y) > 90 or abs(tilt_z) > 90:
+        return "out_margin"
+    if abs(roll) > angle_margin or abs(pitch) > angle_margin:
+        return "out_margin"
+    return "unknown"
+
+
 def cube_face_upward(sensor: MPU6050, margin=0.2, angle_margin=10):
     """
     Enhanced face detection using acceleration-based tilt + roll/pitch.
@@ -529,34 +560,25 @@ def cube_face_upward(sensor: MPU6050, margin=0.2, angle_margin=10):
     Returns:
         str: The name of the upward-facing face.
     """
-    # Get all sensor data: tilt angles, acceleration values, roll & pitch
+    return face_from_tilt(*sensor.tilt_refin(), margin=margin, angle_margin=angle_margin)
+
+
+def sample_face_accel(sensor, margin=0.2, angle_margin=10):
+    """One I2C sample: ((x, y, z) in g, face name). Used by live settle preview."""
     tilt_x, tilt_y, tilt_z, x, y, z, roll, pitch = sensor.tilt_refin()
-
-    # 1. Cutout Detection Using Roll & Pitch**
-    if (115 <= roll <= 145) and (-50 <= pitch <= -30):
-        return "back_cutout"
-    elif (-60 <= roll <= -20) and (20 <= pitch <= 40):
-        return "front_cutout"
-
-    # 2. Face Detection Using Acceleration (Gravity)**
-    # Renamed faces: back→front, left→bottom, front→back, bottom→left, right→top, top→right
-    if -margin <= x <= margin and -margin <= y <= margin:
-        return "left" if z > 0 else "right"  # was bottom / top
-    elif -margin <= y <= margin and -margin <= z <= margin:
-        return "bottom" if x > 0 else "top"  # was left / right
-    elif -margin <= x <= margin and -margin <= z <= margin:
-        return "front" if y > 0 else "back"  # was back / front
-
-    # 3. Additional Tilt Detection (Using asin/acos Method)**
-    # If the tilt angles indicate the cube is **not aligned** with any face
-    if abs(tilt_x) > 90 or abs(tilt_y) > 90 or abs(tilt_z) > 90:
-        return "out_margin"
-
-    # 4. Roll & Pitch Refinement**
-    if abs(roll) > angle_margin or abs(pitch) > angle_margin:
-        return "out_margin"
-
-    return "unknown"
+    face = face_from_tilt(
+        tilt_x,
+        tilt_y,
+        tilt_z,
+        x,
+        y,
+        z,
+        roll,
+        pitch,
+        margin=margin,
+        angle_margin=angle_margin,
+    )
+    return (x, y, z), face
 
 
 def print_orinetation(sensor: MPU6050, frequency: int = 10):
