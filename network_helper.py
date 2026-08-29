@@ -2,7 +2,8 @@ import gc
 
 import uasyncio as asyncio
 import utime as time
-from credentials import load_credentials
+from credentials import load_credentials, load_last_ap, store_last_ap
+from micropython import const
 from network import (
     AP_IF,
     STA_IF,
@@ -13,6 +14,13 @@ from network import (
     hostname,
 )
 from util import suppress
+
+SCAN_SETTLE_MS = const(250)
+FAIL_FAST_MS = const(250)
+SYNC_POLL_MS = const(50)
+ASYNC_POLL_MS = const(100)
+FAST_TIMEOUT_S = const(2)
+DEFAULT_TIMEOUT_S = const(5)
 
 # Last async_do_connect / do_connect outcome for callers (e.g. skip retries).
 # One of: "connected", "no_creds", "no_ssid", "failed", "already"
@@ -99,7 +107,7 @@ def prepare_for_softap(settle_ms=250):
     return ap
 
 
-def start_softap(essid, ip, subnet, authmode, settle_ms=250, retries=3):
+def start_softap(essid, ip, subnet, authmode, settle_ms=250, retries=3, password=None):
     """Bring up SoftAP with retries. Raises last OSError if all attempts fail."""
     last_err = None
     for attempt in range(retries):
@@ -113,8 +121,12 @@ def start_softap(essid, ip, subnet, authmode, settle_ms=250, retries=3):
             )
             ap = prepare_for_softap(settle_ms=settle_ms)
             ap.active(True)
-            # config before ifconfig is more reliable on some MicroPython builds
-            ap.config(essid=essid, authmode=authmode)
+            # config before ifconfig is more reliable on some MicroPython builds.
+            # password + authmode must be the same call (IDF applies kwargs together).
+            if password:
+                ap.config(essid=essid, authmode=authmode, password=password)
+            else:
+                ap.config(essid=essid, authmode=authmode)
             ap.ifconfig((ip, subnet, ip, ip))
             print("SoftAP up", ap.ifconfig(), "mem_free=", gc.mem_free())
             return ap
@@ -138,9 +150,40 @@ def _wifi_configs():
     return configs
 
 
+def _parse_bssid(raw):
+    """Normalize bssid from bytes or hex string to 6 bytes, else None."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        return raw if len(raw) == 6 else None
+    if not isinstance(raw, str):
+        return None
+    chars = []
+    for c in raw:
+        if c not in ":-":
+            chars.append(c)
+    s = "".join(chars)
+    if len(s) != 12:
+        return None
+    try:
+        return bytes(int(s[i : i + 2], 16) for i in range(0, 12, 2))
+    except ValueError:
+        return None
+
+
+def _bssid_hex(bssid):
+    parsed = _parse_bssid(bssid)
+    if not parsed:
+        return None
+    return "".join("%02x" % b for b in parsed)
+
+
 def _scan_visible_ssids():
     """
-    Active scan of nearby APs. Returns a set of SSID strings, or None if scan failed.
+    Active scan of nearby APs.
+
+    Returns (ssid_set_or_None, best_by_ssid). None ssids means scan failed.
+    best_by_ssid maps SSID -> {bssid, channel, rssi} (strongest RSSI).
 
     Hidden SSIDs do not appear here — mark those entries with ``"hidden": true``
     in credentials so we still attempt connect without a scan hit.
@@ -149,19 +192,29 @@ def _scan_visible_ssids():
         results = _get_sta().scan() or []
     except OSError as e:
         print("WiFi scan failed:", e)
-        return None
+        return None, {}
 
     ssids = set()
+    best = {}
     for entry in results:
-        raw = entry[0] if entry else b""
+        if not entry:
+            continue
+        raw = entry[0]
         if isinstance(raw, bytes):
             name = raw.decode("utf-8", "ignore")
         else:
             name = str(raw)
-        if name:
-            ssids.add(name)
+        if not name:
+            continue
+        ssids.add(name)
+        bssid = entry[1] if len(entry) > 1 else None
+        channel = entry[2] if len(entry) > 2 else 0
+        rssi = entry[3] if len(entry) > 3 else -127
+        prev = best.get(name)
+        if prev is None or rssi > prev["rssi"]:
+            best[name] = {"bssid": bssid, "channel": channel, "rssi": rssi}
     print(f"WiFi scan: {len(ssids)} SSID(s) visible")
-    return ssids
+    return ssids, best
 
 
 def _configs_to_try(wifi_configs, visible):
@@ -187,7 +240,7 @@ def _configs_to_try(wifi_configs, visible):
     return to_try
 
 
-def _prepare_sta(low_power=False):
+def _prepare_sta(low_power=False, settle_ms=0):
     """Prepare station mode for home Wi-Fi (SoftAP must be off first)."""
     hostname("FlipBuddy")
     gc.collect()
@@ -199,18 +252,186 @@ def _prepare_sta(low_power=False):
     sta = _get_sta()
     if not sta.active():
         sta.active(True)
-    # Empty scans are common if we scan immediately after active(True)
-    time.sleep_ms(250)
+    if settle_ms:
+        time.sleep_ms(settle_ms)
+    # 0 = one association attempt; default unlimited reconnects burn the poll timeout
+    with suppress(Exception):
+        sta.config(reconnects=0)
     if low_power:
         with suppress(Exception):
             sta.config(pm=sta.PM_POWERSAVE)
 
 
-def do_connect(timeout=10, low_power=False):
-    """Connects to WiFi from credentials (file/NVS). Tries each configured network in order."""
+def _fast_candidate(wifi_configs):
+    """Last successful AP if it still has a password in credentials."""
+    last = load_last_ap()
+    if not last:
+        return None
+    ssid = last.get("ssid")
+    if not ssid:
+        return None
+    for config in wifi_configs:
+        if config.get("ssid") == ssid:
+            out = dict(config)
+            if last.get("bssid"):
+                out["bssid"] = last["bssid"]
+            if last.get("channel"):
+                out["channel"] = last["channel"]
+            return out
+    return None
+
+
+def _with_scan_hint(config, best):
+    if not best:
+        return config
+    hint = best.get(config.get("ssid"))
+    if not hint:
+        return config
+    merged = dict(config)
+    if hint.get("bssid"):
+        merged["bssid"] = hint["bssid"]
+    if hint.get("channel"):
+        merged["channel"] = hint["channel"]
+    return merged
+
+
+def _sta_outcome(sta):
+    if sta.isconnected():
+        return "connected"
+    status = sta.status()
+    if status == STAT_WRONG_PASSWORD:
+        return "wrong_password"
+    if status in (STAT_NO_AP_FOUND, STAT_CONNECT_FAIL):
+        return "no_ap"
+    return "wait"
+
+
+def _start_connect(sta, config):
+    ssid = config.get("ssid")
+    password = config.get("password")
+    bssid = _parse_bssid(config.get("bssid"))
+    try:
+        channel = int(config.get("channel") or 0)
+    except (TypeError, ValueError):
+        channel = 0
+    if channel:
+        with suppress(Exception):
+            sta.config(channel=channel)
+    print(f"Connecting to network: {ssid}...")
+    if bssid:
+        try:
+            sta.connect(ssid, password, bssid=bssid)
+        except TypeError:
+            sta.connect(ssid, password)
+            bssid = None
+    else:
+        sta.connect(ssid, password)
+    return ssid, bssid
+
+
+def _remember_ap(sta, ssid, bssid):
+    ch = 0
+    with suppress(Exception):
+        ch = int(sta.config("channel") or 0)
+    with suppress(Exception):
+        store_last_ap(ssid, _bssid_hex(bssid), ch)
+
+
+def _wait_connected(sta, timeout, poll_ms):
+    start = time.ticks_ms()
+    no_ap_since = None
+    polls = 0
+    limit = int(timeout * 1000)
+    while time.ticks_diff(time.ticks_ms(), start) < limit:
+        outcome = _sta_outcome(sta)
+        if outcome == "connected":
+            return "connected"
+        if outcome == "wrong_password":
+            return "wrong_password"
+        if outcome == "no_ap":
+            now = time.ticks_ms()
+            if no_ap_since is None:
+                no_ap_since = now
+            elif time.ticks_diff(now, no_ap_since) >= FAIL_FAST_MS:
+                return "no_ap"
+        else:
+            no_ap_since = None
+        polls += 1
+        if polls % 20 == 0:
+            _tick_wdt()
+        time.sleep_ms(poll_ms)
+    return "timeout"
+
+
+async def _wait_connected_async(sta, timeout, poll_ms):
+    start = time.ticks_ms()
+    no_ap_since = None
+    polls = 0
+    limit = int(timeout * 1000)
+    while time.ticks_diff(time.ticks_ms(), start) < limit:
+        outcome = _sta_outcome(sta)
+        if outcome == "connected":
+            return "connected"
+        if outcome == "wrong_password":
+            return "wrong_password"
+        if outcome == "no_ap":
+            now = time.ticks_ms()
+            if no_ap_since is None:
+                no_ap_since = now
+            elif time.ticks_diff(now, no_ap_since) >= FAIL_FAST_MS:
+                return "no_ap"
+        else:
+            no_ap_since = None
+        polls += 1
+        if polls % 10 == 0:
+            _tick_wdt()
+        await asyncio.sleep_ms(poll_ms)
+    return "timeout"
+
+
+def _finish_attempt(sta, ssid, bssid, outcome):
+    if outcome == "connected":
+        print(f"Connected to {ssid}! Config: {sta.ifconfig()}")
+        _remember_ap(sta, ssid, bssid)
+        return "connected"
+    if outcome == "wrong_password":
+        print(f"Wrong password for {ssid}. Trying next...")
+    else:
+        print(f"Failed to connect to {ssid} ({outcome}).")
+    with suppress(Exception):
+        sta.disconnect()
+    return outcome
+
+
+def _try_one(sta, config, timeout, poll_ms):
+    ssid, bssid = _start_connect(sta, config)
+    outcome = _finish_attempt(sta, ssid, bssid, _wait_connected(sta, timeout, poll_ms))
+    if outcome != "connected":
+        time.sleep_ms(100)
+    return outcome
+
+
+async def _try_one_async(sta, config, timeout, poll_ms):
+    ssid, bssid = _start_connect(sta, config)
+    outcome = _finish_attempt(
+        sta, ssid, bssid, await _wait_connected_async(sta, timeout, poll_ms)
+    )
+    if outcome != "connected":
+        await asyncio.sleep_ms(100)
+    return outcome
+
+
+def _scan_candidates(wifi_configs):
+    time.sleep_ms(SCAN_SETTLE_MS)
+    visible, best = _scan_visible_ssids()
+    return _configs_to_try(wifi_configs, visible), best
+
+
+def do_connect(timeout=DEFAULT_TIMEOUT_S, low_power=False):
+    """Connect from credentials. Last AP first (no full scan); then scan fallback."""
     global last_connect_status
 
-    _prepare_sta(low_power)
+    _prepare_sta(low_power, settle_ms=0)
     sta = _get_sta()
 
     if sta.isconnected():
@@ -224,57 +445,36 @@ def do_connect(timeout=10, low_power=False):
         last_connect_status = "no_creds"
         return False
 
-    visible = _scan_visible_ssids()
-    candidates = _configs_to_try(wifi_configs, visible)
+    fast = _fast_candidate(wifi_configs)
+    if fast:
+        print(f"Fast reconnect to {fast.get('ssid')}...")
+        if _try_one(sta, fast, FAST_TIMEOUT_S, SYNC_POLL_MS) == "connected":
+            last_connect_status = "connected"
+            return True
+        print("Fast reconnect failed; scanning")
+
+    candidates, best = _scan_candidates(wifi_configs)
     if not candidates:
         print("No configured SSID visible; skipping connect attempts.")
         last_connect_status = "no_ssid"
         return False
 
     for config in candidates:
-        ssid = config.get("ssid")
-        password = config.get("password")
-
-        print(f"Connecting to network: {ssid}...")
-        sta.connect(ssid, password)
-
-        start = time.ticks_ms()
-        polls = 0
-        while time.ticks_diff(time.ticks_ms(), start) < timeout * 1000:
-            status = sta.status()
-
-            if sta.isconnected():
-                print(f"Connected to {ssid}! Config: {sta.ifconfig()}")
-                last_connect_status = "connected"
-                return True
-
-            if status == STAT_WRONG_PASSWORD:
-                print(f"Wrong password for {ssid}. Trying next...")
-                break  # Try next config immediately
-
-            if status in [STAT_NO_AP_FOUND, STAT_CONNECT_FAIL]:
-                # Don't break immediately, give it a moment (e.g. if AP is just starting up)
-                pass
-
-            polls += 1
-            if polls % 20 == 0:
-                _tick_wdt()
-            time.sleep_ms(50)
-
-        print(f"Failed to connect to {ssid} within {timeout}s.")
-        sta.disconnect()
-        time.sleep_ms(100)  # Brief pause before next attempt
+        merged = _with_scan_hint(config, best)
+        if _try_one(sta, merged, timeout, SYNC_POLL_MS) == "connected":
+            last_connect_status = "connected"
+            return True
 
     print("All connection attempts failed.")
     last_connect_status = "failed"
     return False
 
 
-async def async_do_connect(timeout=10, low_power=False):
-    """Async WiFi connect - non-blocking polling. Scans first; skips missing SSIDs."""
+async def async_do_connect(timeout=DEFAULT_TIMEOUT_S, low_power=False):
+    """Async STA connect: last-AP fast path, then scan; fail-fast on NO_AP."""
     global last_connect_status
 
-    _prepare_sta(low_power)
+    _prepare_sta(low_power, settle_ms=0)
     sta = _get_sta()
 
     if sta.isconnected():
@@ -288,49 +488,31 @@ async def async_do_connect(timeout=10, low_power=False):
         last_connect_status = "no_creds"
         return False
 
-    # scan() is blocking on ESP; yield once before/after so other tasks can run
-    await asyncio.sleep_ms(0)
-    visible = _scan_visible_ssids()
-    await asyncio.sleep_ms(0)
+    fast = _fast_candidate(wifi_configs)
+    if fast:
+        print(f"Fast reconnect to {fast.get('ssid')}...")
+        await asyncio.sleep_ms(0)
+        if (
+            await _try_one_async(sta, fast, FAST_TIMEOUT_S, ASYNC_POLL_MS)
+            == "connected"
+        ):
+            last_connect_status = "connected"
+            return True
+        print("Fast reconnect failed; scanning")
 
-    candidates = _configs_to_try(wifi_configs, visible)
+    await asyncio.sleep_ms(0)
+    candidates, best = _scan_candidates(wifi_configs)
+    await asyncio.sleep_ms(0)
     if not candidates:
         print("No configured SSID visible; skipping connect attempts.")
         last_connect_status = "no_ssid"
         return False
 
     for config in candidates:
-        ssid = config.get("ssid")
-        password = config.get("password")
-
-        print(f"Connecting to network: {ssid}...")
-        sta.connect(ssid, password)
-
-        start = time.ticks_ms()
-        polls = 0
-        while time.ticks_diff(time.ticks_ms(), start) < timeout * 1000:
-            status = sta.status()
-
-            if sta.isconnected():
-                print(f"Connected to {ssid}! Config: {sta.ifconfig()}")
-                last_connect_status = "connected"
-                return True
-
-            if status == STAT_WRONG_PASSWORD:
-                print(f"Wrong password for {ssid}. Trying next...")
-                break
-
-            if status in [STAT_NO_AP_FOUND, STAT_CONNECT_FAIL]:
-                pass  # Continue polling
-
-            polls += 1
-            if polls % 10 == 0:
-                _tick_wdt()
-            await asyncio.sleep_ms(100)  # Non-blocking!
-
-        print(f"Failed to connect to {ssid} within {timeout}s.")
-        sta.disconnect()
-        await asyncio.sleep_ms(200)
+        merged = _with_scan_hint(config, best)
+        if await _try_one_async(sta, merged, timeout, ASYNC_POLL_MS) == "connected":
+            last_connect_status = "connected"
+            return True
 
     print("All connection attempts failed.")
     last_connect_status = "failed"

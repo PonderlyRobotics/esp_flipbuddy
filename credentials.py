@@ -8,6 +8,7 @@ from util import suppress
 
 NVS_NS = "cred"
 KEY = "json"
+LAST_AP_KEY = "lastap"
 _nvs = None
 
 
@@ -98,6 +99,47 @@ def wifi_profiles_public():
     return out
 
 
+def load_last_ap():
+    """Return last successful STA AP {ssid, bssid?, channel?} or None.
+
+    Stored on a separate NVS key so connect updates do not rewrite credentials.
+    """
+    nvs = _get_nvs()
+    buffer = bytearray(128)
+    try:
+        size = nvs.get_blob(LAST_AP_KEY, buffer)
+        if not size:
+            return None
+        data = ujson.loads(buffer[:size].decode())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("ssid"):
+        return None
+    return data
+
+
+def store_last_ap(ssid, bssid=None, channel=0):
+    """Remember the AP we just joined (ssid + optional bssid hex + channel)."""
+    name = str(ssid or "").strip()
+    if not name:
+        return
+    data = {"ssid": name}
+    if bssid:
+        data["bssid"] = str(bssid)
+    try:
+        ch = int(channel or 0)
+    except (TypeError, ValueError):
+        ch = 0
+    if ch:
+        data["channel"] = ch
+    payload = ujson.dumps(data).encode()
+    nvs = _get_nvs()
+    with suppress(OSError):
+        nvs.erase_key(LAST_AP_KEY)
+    nvs.set_blob(LAST_AP_KEY, payload)
+    nvs.commit()
+
+
 def store_wifi_profile(profile_name, ssid, password, hidden=False):
     """
     Add or update one wifi.* profile in NVS.
@@ -154,6 +196,17 @@ def default_ap_unlock_pin(device_id):
     if len(raw) >= 6:
         return raw[-6:]
     return (raw + "000000")[:6]
+
+
+def default_ap_psk(device_id):
+    """WPA2 join password: FB + factory PIN (always 8 chars, independent of custom PIN)."""
+    return "FB" + default_ap_unlock_pin(device_id)
+
+
+def get_ap_psk():
+    """SoftAP WPA2-PSK from device_id. Ignores custom unlock PIN."""
+    data = load_credentials() or {}
+    return default_ap_psk(data.get("device_id") or "")
 
 
 def get_ap_unlock_pin(device_id=None):

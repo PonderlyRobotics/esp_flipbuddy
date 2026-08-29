@@ -67,21 +67,37 @@ def _ensure_micropython_shims():
 
     if "network" not in sys.modules:
         network = types.ModuleType("network")
+        # ESP32 port values (wifi_err_reason_t), not the CYW43 numbers.
         network.AP_IF = 0
         network.STA_IF = 1
         network.AUTH_OPEN = 0
-        network.STAT_CONNECT_FAIL = 4
-        network.STAT_NO_AP_FOUND = 1
-        network.STAT_WRONG_PASSWORD = 2
+        network.AUTH_WPA2_PSK = 3
+        network.AUTH_WPA_WPA2_PSK = 4
+        network.STAT_IDLE = 1000
+        network.STAT_CONNECTING = 1001
+        network.STAT_GOT_IP = 1010
+        network.STAT_NO_AP_FOUND = 201
+        network.STAT_WRONG_PASSWORD = 202
+        network.STAT_CONNECT_FAIL = 203
         network.hostname = MagicMock()
 
         class WLAN:
             created = []
+            connect_calls = []
+            connect_behavior = []
+            scan_results = []
+            scan_count = 0
+            auto_connect = False
+            status_code = 0
 
             def __init__(self, iface):
                 self.iface = iface
                 self._active = False
                 self._cfg = None
+                self._connected = False
+                self._status = WLAN.status_code
+                self._config = {}
+                self.config_calls = []
                 WLAN.created.append(self)
 
             def active(self, v=None):
@@ -91,27 +107,58 @@ def _ensure_micropython_shims():
                 return self._active
 
             def isconnected(self):
-                return False
+                return self._connected
 
             def disconnect(self):
-                pass
+                self._connected = False
 
-            def connect(self, *a, **k):
-                pass
+            def connect(self, ssid=None, password=None, **kw):
+                WLAN.connect_calls.append({"ssid": ssid, "password": password, **kw})
+                action = None
+                if WLAN.connect_behavior:
+                    action = WLAN.connect_behavior.pop(0)
+                elif WLAN.auto_connect:
+                    action = "ok"
+                if action == "ok":
+                    self._connected = True
+                    self._status = network.STAT_GOT_IP
+                elif action == "no_ap":
+                    self._connected = False
+                    self._status = network.STAT_NO_AP_FOUND
+                elif action == "bad_pass":
+                    self._connected = False
+                    self._status = network.STAT_WRONG_PASSWORD
+                elif action == "fail":
+                    self._connected = False
+                    self._status = network.STAT_CONNECT_FAIL
 
             def status(self):
-                return 0
+                return self._status
 
             def scan(self):
-                return []
+                WLAN.scan_count += 1
+                return list(WLAN.scan_results)
 
             def ifconfig(self, cfg=None):
                 if cfg is not None:
                     self._cfg = cfg
+                if self._connected:
+                    return self._cfg or (
+                        "192.168.1.2",
+                        "255.255.255.0",
+                        "192.168.1.1",
+                        "8.8.8.8",
+                    )
                 return self._cfg or ("0.0.0.0", "0.0.0.0", "0.0.0.0", "0.0.0.0")
 
-            def config(self, **k):
-                pass
+            def config(self, *args, **k):
+                if k:
+                    self.config_calls.append(dict(k))
+                    self._config.update(k)
+                    return None
+                if args:
+                    return self._config.get(args[0])
+                return None
 
             PM_POWERSAVE = 1
 
@@ -175,6 +222,12 @@ def _ensure_micropython_shims():
     if "uasyncio" in sys.modules:
         import asyncio as real_asyncio
 
+        if not hasattr(real_asyncio, "sleep_ms"):
+
+            async def _sleep_ms(ms):
+                await real_asyncio.sleep(0)
+
+            real_asyncio.sleep_ms = _sleep_ms
         sys.modules["uasyncio"] = real_asyncio
 
 
@@ -191,6 +244,22 @@ def _clear_nvs_store():
 
 
 @pytest.fixture(autouse=True)
+def _ignore_workspace_credentials_json(monkeypatch):
+    """load_credentials() reads ./credentials.json; keep host tests on NVS only."""
+    import builtins
+
+    real_open = builtins.open
+
+    def guarded(path, *args, **kwargs):
+        name = path if isinstance(path, str) else getattr(path, "name", path)
+        if str(name) == "credentials.json":
+            raise OSError(2, "No such file")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded)
+
+
+@pytest.fixture(autouse=True)
 def _reset_nvs():
     """Isolate NVS state between tests."""
     _clear_nvs_store()
@@ -199,8 +268,21 @@ def _reset_nvs():
     created = getattr(wlan, "created", None) if wlan is not None else None
     if created is not None and hasattr(created, "clear"):
         created.clear()
+    if wlan is not None:
+        if hasattr(wlan, "connect_calls"):
+            wlan.connect_calls = []
+        if hasattr(wlan, "connect_behavior"):
+            wlan.connect_behavior = []
+        if hasattr(wlan, "scan_results"):
+            wlan.scan_results = []
+        if hasattr(wlan, "scan_count"):
+            wlan.scan_count = 0
+        if hasattr(wlan, "auto_connect"):
+            wlan.auto_connect = False
+        if hasattr(wlan, "status_code"):
+            wlan.status_code = 0
     # Drop cached project modules so they re-bind to fresh NVS
-    for mod in ("credentials", "ap_mode", "network_helper"):
+    for mod in ("credentials", "ap_mode", "network_helper", "ap_session"):
         sys.modules.pop(mod, None)
     yield
     _clear_nvs_store()
