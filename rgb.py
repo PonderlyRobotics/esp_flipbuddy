@@ -18,6 +18,52 @@ pinout = {
     "right": {"led": 5, "type": "neopixel"},
 }
 
+# USB / stop-cutout indicator: three activity-face LEDs around the cutout.
+# Super Mini 0.1.3 mapping (front_cutout vs back_cutout).
+TRIAD_FACES = {
+    "front_cutout": ("bottom", "left", "back"),
+    "back_cutout": ("top", "right", "front"),
+}
+ENABLE_SOFTAP_INDICATOR = True
+SOFTAP_LED_COLOR = "#FFFF00"
+
+
+def _hex_to_np_rgb(hex_code, intensity_level=DEFAULT_INTENSITY_LEVEL):
+    hex_code = hex_code.lstrip("#")
+    r = int(hex_code[0:2], 16)
+    g = int(hex_code[2:4], 16)
+    b = int(hex_code[4:6], 16)
+    max_brightness = int(1023 * intensity_level / MAX_INTENSITY)
+
+    def _scale(val):
+        cal = min(int(val * max_brightness / 255), 1023)
+        return int(cal / 1023 * 255)
+
+    return _scale(r), _scale(g), _scale(b)
+
+
+def set_cutout_triad_static(np_obj, view, hex_code=None):
+    """Light a cutout triad solid (no blink). Other pixels off.
+
+    No-op when ENABLE_SOFTAP_INDICATOR is False.
+    """
+    if not ENABLE_SOFTAP_INDICATOR:
+        return
+    if hex_code is None:
+        hex_code = SOFTAP_LED_COLOR
+    rgb = _hex_to_np_rgb(hex_code)
+    n = getattr(np_obj, "n", None)
+    if n is None:
+        try:
+            n = len(np_obj)
+        except TypeError:
+            n = 6
+    for i in range(n):
+        np_obj[i] = (0, 0, 0)
+    for face in TRIAD_FACES.get(view, ()):
+        np_obj[pinout[face]["led"]] = rgb
+    np_obj.write()
+
 
 # -----------------------------------
 # -- Base Class (Common Interface) --
@@ -391,12 +437,8 @@ class FaceLEDNeoPixel(FaceLEDBase):
     async def triad_led(self, view, status=False, color_hex="#ff0040"):
         print(f"triad_led called for {view}, status={status}")
         self.error_combo = []  # Clear previous error LED channels
-        x = {
-            "front_cutout": ("bottom", "left", "back"),
-            "back_cutout": ("top", "right", "front"),
-        }
         if status:
-            triad_view = x.get(view, [])
+            triad_view = TRIAD_FACES.get(view, ())
             _ = [self.error_combo.append(pinout[face]["led"]) for face in triad_view]
             print(f"error_combo{self.error_combo}")
             # Start background blinking task
