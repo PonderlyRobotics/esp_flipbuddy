@@ -69,7 +69,7 @@ import mip
 import neopixel
 import uasyncio as asyncio
 import utime as time
-from credentials import load_credentials
+from credentials import load_ap_psk, load_credentials, print_missing_ap_psk_repl
 from machine import (
     ADC,
     DEEPSLEEP_RESET,
@@ -94,6 +94,7 @@ from network_helper import (
 )
 import network_helper
 from ntptime import settime as ntp_settime
+from rgb import IDENTIFY_GREEN, set_all_pixels
 from util import (
     SETTLE_HZ,
     SETTLE_TIMEOUT_S,
@@ -168,15 +169,11 @@ CREDENTIALS_OK = bool(
 )
 if not CREDENTIALS_OK:
     print("=" * 48)
-    print("FATAL: no device credentials (device_id / device_token).")
-    print("  1. Download credentials.json from flipbuddy.app")
-    print('  2. Add Wi-Fi under wifi.<name>: {"ssid": "...", "password": "..."}')
-    print('     Example: "wifi": {"home": {"ssid": "MyNet", "password": "secret"}}')
-    print('     Hidden SSID: set "hidden": true on that entry')
-    print("  3. just put-credentials   (or just fast-track)")
-    print("  4. Power cycle (or soft-reboot)")
+    print("Unclaimed: no device_id / device_token in NVS.")
+    print("  Pair from the cube SoftAP (just gen-ap-psk / just put-ap-psk).")
+    print("  House Wi-Fi stays in NVS; it is never in credentials.json.")
+    print("  Recovery identity only: just put-credentials")
     print("=" * 48)
-    print("Staying at REPL - app not started.")
     TOKEN = ""
     HEADERS = {}
     API_BASE = "https://api.flipbuddy.app/v1/api/"
@@ -727,6 +724,10 @@ class ActiveFSM(BaseFSM):
             )
             * 1000
         )
+        if self.config.running["settings"].get("pairing_identify"):
+            # USB confirm poll: at least every 30 s.
+            if self.sleep_ms > 30_000:
+                self.sleep_ms = 30_000
         self.need_upload = False
         self.ap_mode = False
 
@@ -753,6 +754,9 @@ class ActiveFSM(BaseFSM):
                         SOFTAP_CAPTIVE_PORTAL_ENABLED
                         and self.config.running["settings"].get(
                             "ap_mode_enabled", False
+                        )
+                        and not self.config.running["settings"].get(
+                            "pairing_identify", False
                         )
                         and self.face_obj
                         and self.face_obj.orientation == "back_cutout"
@@ -803,7 +807,22 @@ class ActiveFSM(BaseFSM):
             return self.face_obj.stop_face
         return False
 
+    async def _pairing_identify_blink(self):
+        """All LEDs blink green. Token is already in NVS; this is pending_confirm."""
+        if self.np_vcc:
+            self.np_vcc.on()
+            time.sleep_ms(50)
+        for _i in range(4):
+            set_all_pixels(self.np_obj, IDENTIFY_GREEN)
+            await asyncio.sleep_ms(250)
+            set_all_pixels(self.np_obj, "#000000")
+            await asyncio.sleep_ms(250)
+        set_all_pixels(self.np_obj, IDENTIFY_GREEN)
+
     async def show_face_indicator(self):
+        if self.config.running["settings"].get("pairing_identify"):
+            await self._pairing_identify_blink()
+            return
         if wake_reason() == PIN_WAKE:
             self.np_vcc.on()
             assigned_face = [
@@ -1319,8 +1338,14 @@ async def main():
 
 if __name__ == "__main__":
     if not CREDENTIALS_OK:
-        # main.py ends here → MicroPython friendly REPL (no SystemExit soft-reboot loop)
-        pass
+        # Unclaimed: host must have provisioned ap_psk (just gen-ap-psk).
+        # Missing PSK → friendly REPL with recipes. Present PSK → pairing SoftAP.
+        if load_ap_psk() is None:
+            print_missing_ap_psk_repl()
+        else:
+            import pairing_portal
+
+            pairing_portal.run()
     else:
         scheduler_wd = Timer(TIMER_NUM)
         scheduler_wd.init(period=8000, mode=Timer.PERIODIC, callback=wdt_chk)

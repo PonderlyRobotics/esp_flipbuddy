@@ -28,6 +28,8 @@ FORBIDDEN_NAME_RE = re.compile(
     r"^credentials\.json$|"
     r"^credentials[_-].*\.json$|"
     r".*credentials.*\.json$|"
+    r"^ap_psk\.json$|"
+    r"^ap_psk\.txt$|"
     r"^\.env$|"
     r"^\.env\..+|"
     r".*\.pem$|"

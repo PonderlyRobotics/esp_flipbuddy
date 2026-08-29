@@ -5,9 +5,10 @@
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
 #   2. just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
-#   3. just fast-track   # main.py + credentials.json
-#   4. Power cycle the device.
+#   3. just fast-track   # main.py + ap_psk, then hard reset (does NOT upload credentials.json)
+#   4. Join FlipBuddy-XXXX with the printed password.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
+# JSON recovery (advanced): just put-credentials
 #
 # Device recipes default to mpremote. Legacy ampy: just upload-ampy / put-credentials-ampy.
 #
@@ -24,10 +25,31 @@ esp_chip := "s3"                             # esptool --chip esp32{{ esp_chip }
 esp_flash_size := "4MB"                      # document your module flash; shown by `just env`
 
 # Firmware modules for the ESP only (not host tools: test_fsm.py, clean_frozen.py, scripts/)
-device_py := "main.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py"
+device_py := "main.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
 # AST-stripped modules written by `just clean-frozen` (no main.py — kept full-size / editable)
 cleaned_dir := "/tmp/flipbuddy_cleaned"
-cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py"
+cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py pairing.py pairing_portal.py"
+
+# stderr spinner while a quiet command runs (mpremote cp/exec/reset).
+wait_spin := '''
+wait_spin() {
+  if [[ ! -t 2 ]]; then
+    "$@" >/dev/null
+    return
+  fi
+  "$@" >/dev/null &
+  local pid=$! i=0 rc=0
+  local sp='|/-\'
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r  waiting %s' "${sp:$((i % 4)):1}" >&2
+    i=$((i + 1))
+    sleep 0.1
+  done
+  wait "$pid" || rc=$?
+  printf '\r\033[K' >&2
+  return "$rc"
+}
+'''
 
 [private]
 default:
@@ -51,8 +73,8 @@ ls:
 # Upload firmware Python sources (DIY / full source path — not needed on frozen fast track)
 [group("Device")]
 upload:
-    mpremote connect {{ usb_dev }} cp {{ device_py }} :
-    @echo "Upload complete. Reset the ESP32 to run the new code."
+    @mpremote connect {{ usb_dev }} cp {{ device_py }} : >/dev/null
+    @echo "uploaded device sources"
 
 # Legacy ampy upload
 [group("Device")]
@@ -77,37 +99,135 @@ reset-state:
 # Upload main.py only (frozen image path — do not mass-upload other modules)
 [group("Device")]
 put-main:
-    mpremote connect {{ usb_dev }} cp main.py :
-    @echo "main.py uploaded."
+    @mpremote connect {{ usb_dev }} cp main.py : >/dev/null
+    @echo "uploaded main.py"
 
-# Upload credentials.json (will be migrated to NVS on first boot)
+# Print a random SoftAP join password (does not talk to the cube).
+# MicroPython will not invent ap_psk at boot. Write this down, then just put-ap-psk.
+[group("Device")]
+gen-ap-psk:
+    python3 scripts/gen_ap_psk.py
+
+# Copy ap_psk.json onto the cube (migrates to NVS on boot). Run after gen-ap-psk.
+[group("Device")]
+put-ap-psk:
+    @test -f ap_psk.json || (echo "ap_psk.json not found. Run: just gen-ap-psk" && exit 1)
+    @mpremote connect {{ usb_dev }} cp ap_psk.json : >/dev/null
+    @echo "uploaded ap_psk.json"
+
+# Reflash / unpair: BOOT + RST, then erase-flash.
+[group("Device")]
+bootloader-help:
+    @echo "OSS unpair / reflash (NVS is wiped):"
+    @echo "  1. Hold BOOT, tap RST, release BOOT (download mode)."
+    @echo "  2. just flash-firmware   # erase-flash + write image"
+    @echo "  3. just gen-ap-psk && just put-ap-psk"
+    @echo "  4. Power-cycle. Pairing SoftAP uses the new password."
+
+# Upload credentials.json (Advanced / recovery). Identity only → NVS on first boot.
+# House Wi-Fi in that file is stripped before copy (NVS / pairing SoftAP only).
+# Not part of just fast-track / just diy — those would skip pairing SoftAP.
 [group("Device")]
 put-credentials:
-    @test -f credentials.json || (echo "credentials.json not found next to justfile" && exit 1)
-    mpremote connect {{ usb_dev }} cp credentials.json :
-    @echo "credentials.json uploaded."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f credentials.json || { echo "credentials.json not found next to justfile"; exit 1; }
+    tmp="$(mktemp)"
+    python3 -c '
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+data = json.load(open(src, encoding="utf-8"))
+if not isinstance(data, dict):
+    sys.exit("credentials.json is not an object")
+data.pop("wifi", None)
+data.pop("ssid", None)
+data.pop("password", None)
+json.dump(data, open(dst, "w", encoding="utf-8"))
+' credentials.json "$tmp"
+    mpremote connect {{ usb_dev }} cp "$tmp" :credentials.json
+    rm -f "$tmp"
+    echo "credentials.json uploaded (recovery; house Wi-Fi stripped). Pairing SoftAP will not start."
 
 [group("Device")]
 put-credentials-ampy:
-    @test -f credentials.json || (echo "credentials.json not found next to justfile" && exit 1)
-    ampy --port {{ usb_dev }} put credentials.json
-    @echo "credentials.json uploaded (ampy)."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f credentials.json || { echo "credentials.json not found next to justfile"; exit 1; }
+    tmp="$(mktemp)"
+    python3 -c '
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+data = json.load(open(src, encoding="utf-8"))
+if not isinstance(data, dict):
+    sys.exit("credentials.json is not an object")
+data.pop("wifi", None)
+data.pop("ssid", None)
+data.pop("password", None)
+json.dump(data, open(dst, "w", encoding="utf-8"))
+' credentials.json "$tmp"
+    ampy --port {{ usb_dev }} put "$tmp" credentials.json
+    rm -f "$tmp"
+    echo "credentials.json uploaded (ampy, recovery; house Wi-Fi stripped)."
 
-# Fast track FS deploy: main.py + credentials (after flashing the frozen Release .bin)
+# Write NVS api_url from a full https:// base (no aliases).
+# Optional default: FLIPBUDDY_API_URL in gitignored mise.local.toml.
 [group("Device")]
-fast-track:
-    @echo "→ Fast track: main.py + credentials.json on {{ usb_dev }}"
-    just put-main
-    just put-credentials
-    @echo "✓ Fast track upload done. Power-cycle the ESP32."
+put-api-url api_url:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ wait_spin }}
+    raw="{{ api_url }}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    if [[ ! "$raw" =~ ^https://[A-Za-z0-9._~:/=-]+$ ]]; then
+      echo "error: pass a full https:// API base (no aliases)" >&2
+      exit 1
+    fi
+    url="${raw%/}/"
+    printf '%s\n' "$url" > api_url.txt
+    wait_spin mpremote connect "{{ usb_dev }}" cp api_url.txt :
+    wait_spin mpremote connect "{{ usb_dev }}" exec "from credentials import load_credentials,_write_to_nvs;u=open('api_url.txt').read().strip().rstrip('/')+'/';d=load_credentials() or {};d['api_url']=u;_write_to_nvs(d)"
+    echo "api $url"
 
-# DIY FS deploy: all firmware modules + credentials (stock MicroPython / full sources)
+# Fast track FS deploy after flashing the frozen Release .bin.
+# main.py + SoftAP join password. Does **not** upload credentials.json.
+# Optional https API base: just fast-track https://host/v1/api/
 [group("Device")]
-diy:
-    @echo "→ DIY: full device_py + credentials.json on {{ usb_dev }}"
-    just upload
-    just put-credentials
-    @echo "✓ DIY upload done. Power-cycle the ESP32."
+fast-track api_url=env("FLIPBUDDY_API_URL", ""):
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ wait_spin }}
+    port="{{ usb_dev }}"
+    echo "→ fast-track $port"
+    wait_spin mpremote connect "$port" cp main.py :
+    python3 scripts/gen_ap_psk.py --ensure --quiet
+    wait_spin mpremote connect "$port" cp ap_psk.json :
+    if [[ -n "{{ api_url }}" ]]; then
+      just put-api-url "{{ api_url }}"
+    fi
+    # Hard reset (not soft-reset): drops stale USB-face SoftAP mark so pairing runs.
+    wait_spin mpremote connect "$port" reset
+    echo "reset. Join FlipBuddy-XXXX with the password above."
+
+# DIY FS deploy: all firmware modules + SoftAP PSK (stock MicroPython / full sources).
+# Does **not** upload credentials.json. Recovery: just put-credentials.
+# Optional https API base: just diy https://host/v1/api/
+[group("Device")]
+diy api_url=env("FLIPBUDDY_API_URL", ""):
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ wait_spin }}
+    port="{{ usb_dev }}"
+    echo "→ diy $port"
+    wait_spin mpremote connect "$port" cp {{ device_py }} :
+    python3 scripts/gen_ap_psk.py --ensure --quiet
+    wait_spin mpremote connect "$port" cp ap_psk.json :
+    if [[ -n "{{ api_url }}" ]]; then
+      just put-api-url "{{ api_url }}"
+    fi
+    # Hard reset (not soft-reset): drops stale USB-face SoftAP mark so pairing runs.
+    wait_spin mpremote connect "$port" reset
+    echo "reset. Join FlipBuddy-XXXX with the password above."
 
 # Dump config + tracker from device NVS → local JSON (stops scheduler_wd first; NVS left intact)
 [group("Device")]
@@ -130,10 +250,11 @@ flash-firmware firmware="esp32_s3_flipbuddy_0.1.5.bin":
     #   just flash-firmware ESP32_GENERIC_S3-....bin       # stock MicroPython
     #
     # Frozen FlipBuddy images are on GitHub Releases (not committed). Verify .sha256 then flash.
-    # After the frozen image: main.py + credentials.json only on the FS.
-    # Stock MicroPython builds: https://micropython.org/download/ESP32_GENERIC_S3/
+    # After the frozen image: main.py + ap_psk.json on the FS (just fast-track).
+    # JSON recovery: just put-credentials. Stock MP: https://micropython.org/download/ESP32_GENERIC_S3/
     @test -f "{{ firmware }}" || (echo "Firmware file not found: {{ firmware }}" && echo "Download the Release asset first (see README / CONTRIBUTING)." && exit 1)
     @echo "!!! This will ERASE the entire flash on {{ usb_dev }}"
+    @echo "!!! NVS (token, wifi, ap_psk) is wiped. After flash: just gen-ap-psk && just put-ap-psk"
     @echo "→ Flashing {{ firmware }} ..."
     esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} erase-flash
     esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} --baud 460800 write-flash 0 {{ firmware }}
@@ -141,7 +262,9 @@ flash-firmware firmware="esp32_s3_flipbuddy_0.1.5.bin":
 # =============================================================================
 # ADVANCED
 # =============================================================================
-# Tools for building smaller custom frozen firmware (requires full MicroPython + IDF)
+# Tools for building smaller custom frozen firmware (requires full MicroPython + IDF).
+# Pairing helpers must be frozen into a Release image so pairing works without
+# filesystem pairing_portal.py. This public justfile does not run Docker IDF.
 
 # Strip docstrings, prints and comments from sources using AST → cleaned_dir
 # Used by upload-clean / upload-mp-clean and custom frozen image builds.

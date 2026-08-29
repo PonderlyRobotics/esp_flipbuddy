@@ -25,6 +25,7 @@ TRIAD_FACES = {
 }
 ENABLE_SOFTAP_INDICATOR = True
 SOFTAP_LED_COLOR = "#FFFF00"
+IDENTIFY_GREEN = "#00FF00"
 
 
 def _hex_to_np_rgb(hex_code, intensity_level=DEFAULT_INTENSITY_LEVEL):
@@ -61,6 +62,26 @@ def set_cutout_triad_static(np_obj, view, hex_code=None):
         np_obj[i] = (0, 0, 0)
     for face in TRIAD_FACES.get(view, ()):
         np_obj[pinout[face]["led"]] = rgb
+    np_obj.write()
+
+
+def _pixel_count(np_obj):
+    n = getattr(np_obj, "n", None)
+    if n is None:
+        try:
+            n = len(np_obj)
+        except TypeError:
+            n = 6
+    return n
+
+
+def set_all_pixels(np_obj, hex_code):
+    """Light every NeoPixel a solid color (pairing identify)."""
+    if np_obj is None:
+        return
+    rgb = _hex_to_np_rgb(hex_code)
+    for i in range(_pixel_count(np_obj)):
+        np_obj[i] = rgb
     np_obj.write()
 
 

@@ -1,4 +1,9 @@
-"""Device credentials and SoftAP settings stored in NVS (or one-time credentials.json)."""
+"""Device credentials and SoftAP settings stored in NVS.
+
+House Wi-Fi (SSID/password) is NVS-only. Recovery `credentials.json` may carry
+identity (`device_id` / `device_token`); firmware never copies `wifi` from a
+filesystem file and never posts house Wi-Fi to the API.
+"""
 
 import os
 
@@ -9,6 +14,13 @@ from util import suppress
 NVS_NS = "cred"
 KEY = "json"
 LAST_AP_KEY = "lastap"
+AP_PSK_KEY = "appsk"
+# Same alphabet as FlipBuddy pairing codes (no 0/O/1/I/L).
+AP_PSK_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+AP_PSK_LEN = 8
+AP_PSK_FILE = "ap_psk.json"
+API_URL_FILE = "api_url.txt"
+DEFAULT_API_URL = "https://api.flipbuddy.app/v1/api/"
 _nvs = None
 
 
@@ -28,45 +40,120 @@ def _write_to_nvs(data):
     nvs.commit()
 
 
-def load_credentials():
-    """Load credentials from credentials.json once (migrate to NVS) or from NVS.
-
-    Returns a dict, or None if nothing valid is stored.
-    """
+def _nvs_credentials_dict():
     nvs = _get_nvs()
     buffer = bytearray(1024)
-
-    try:
-        with open("credentials.json") as f:
-            data = ujson.load(f)
-        if not isinstance(data, dict) or not data.get("device_id"):
-            print("credentials.json missing device_id - not migrating")
-        else:
-            print("Migrating credentials from file to NVS")
-            _write_to_nvs(data)
-            with suppress(OSError):
-                os.remove("credentials.json")
-            return data
-    except OSError:
-        pass
-    except ValueError as e:
-        print("credentials.json is not valid JSON:", e)
-
     try:
         size = nvs.get_blob(KEY, buffer)
-        if size == 0:
-            raise OSError
+        if not size:
+            return {}
         data = ujson.loads(buffer[:size].decode())
-        if isinstance(data, dict) and data.get("device_id"):
-            return data
+        return data if isinstance(data, dict) else {}
+    except OSError:
+        return {}
+    except ValueError:
+        print("NVS credentials corrupt")
+        return {}
+
+
+def _strip_house_wifi(data):
+    """Drop house SSID/password so they cannot migrate from a filesystem file."""
+    dropped = False
+    if not isinstance(data, dict):
+        return data, dropped
+    if "wifi" in data:
+        data.pop("wifi", None)
+        dropped = True
+    for k in ("ssid", "password"):
+        if k in data:
+            data.pop(k, None)
+            dropped = True
+    return data, dropped
+
+
+def _remove_credentials_json():
+    with suppress(OSError):
+        os.remove("credentials.json")
+
+
+def load_credentials():
+    """Load identity from credentials.json once (migrate to NVS) or from NVS.
+
+    House Wi-Fi in the recovery file is ignored. Existing NVS `wifi` is kept.
+    The file is deleted after ingest so it cannot stay on the filesystem.
+    Returns a dict, or None if nothing valid is stored.
+    """
+    file_data = None
+    try:
+        with open("credentials.json") as f:
+            file_data = ujson.load(f)
+    except OSError:
+        file_data = None
+    except ValueError as e:
+        print("credentials.json is not valid JSON:", e)
+        _remove_credentials_json()
+        file_data = None
+
+    if file_data is not None:
+        nvs_data = _nvs_credentials_dict()
+        if not isinstance(file_data, dict):
+            print("credentials.json is not an object - not migrating")
+            _remove_credentials_json()
+        else:
+            file_data, dropped = _strip_house_wifi(file_data)
+            if dropped:
+                print("credentials.json house Wi-Fi ignored (NVS / pairing only)")
+            psk = file_data.get("ap_psk")
+            if psk:
+                try:
+                    store_ap_psk(str(psk))
+                except ValueError:
+                    print("credentials.json ap_psk is not a valid SoftAP password")
+            keep_wifi = nvs_data.get("wifi")
+            if not isinstance(keep_wifi, dict):
+                keep_wifi = None
+            if file_data.get("device_id"):
+                print("Migrating credentials from file to NVS")
+                nvs_data.update(file_data)
+                if keep_wifi:
+                    nvs_data["wifi"] = keep_wifi
+                else:
+                    nvs_data.pop("wifi", None)
+                nvs_data.pop("ap_psk", None)
+                _write_to_nvs(nvs_data)
+                _remove_credentials_json()
+                return nvs_data
+            print("credentials.json missing device_id - not migrating identity")
+            _remove_credentials_json()
+
+    data = _nvs_credentials_dict()
+    if data and (
+        data.get("device_id")
+        or data.get("wifi")
+        or data.get("ap_psk")
+        or data.get("api_url")
+    ):
+        return data
+    if data:
         print("NVS credentials incomplete (no device_id)")
         return None
-    except OSError:
-        print("No credentials found")
-        return None
-    except ValueError as e:
-        print("NVS credentials corrupt:", e)
-        return None
+    print("No credentials found")
+    return None
+
+
+def forget_account(keep_wifi=True):
+    """Wipe SaaS identity. Keep SoftAP ap_psk. Optional keep house wifi.
+
+    Claimed USB-face SoftAP PIN-gated Forget FlipBuddy account.
+    """
+    data = load_credentials() or {}
+    data.pop("device_id", None)
+    data.pop("device_token", None)
+    if not keep_wifi:
+        data["wifi"] = {}
+    _write_to_nvs(data)
+    print("Forget account: device_id/token cleared; ap_psk kept")
+    return True
 
 
 def store_credentials(device_id, device_token):
@@ -140,11 +227,191 @@ def store_last_ap(ssid, bssid=None, channel=0):
     nvs.commit()
 
 
+def _normalize_ap_psk(raw):
+    """Uppercase alphabet-only PSK; return None if too short."""
+    out = []
+    allowed = AP_PSK_ALPHABET
+    for c in str(raw or ""):
+        u = c.upper()
+        if u in allowed:
+            out.append(u)
+    psk = "".join(out)
+    if len(psk) < AP_PSK_LEN:
+        return None
+    if len(psk) > 63:
+        psk = psk[:63]
+    return psk
+
+
+def store_ap_psk(raw):
+    """Persist SoftAP join password in NVS. Host `just gen-ap-psk` is the source."""
+    psk = _normalize_ap_psk(raw)
+    if not psk:
+        raise ValueError("ap_psk too short")
+    nvs = _get_nvs()
+    with suppress(OSError):
+        nvs.erase_key(AP_PSK_KEY)
+    nvs.set_blob(AP_PSK_KEY, psk.encode())
+    nvs.commit()
+    print("SoftAP PSK stored in NVS")
+    return psk
+
+
+def _psk_from_file_bytes(raw):
+    """Parse host ap_psk.json object.
+
+    Must not alphabet-scan the blob: the key name `ap_psk` is in the
+    password alphabet and would prefix the real value.
+    """
+    text = str(raw or "").strip()
+    if not text or text[:1] != "{":
+        return None
+    try:
+        data = ujson.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = data.get("ap_psk")
+    if val is None:
+        return None
+    s = str(val).strip()
+    return s or None
+
+
+def _read_ap_psk_file():
+    try:
+        with open(AP_PSK_FILE) as f:
+            return _psk_from_file_bytes(f.read())
+    except OSError:
+        return None
+
+
+def load_ap_psk():
+    """Return NVS ap_psk, migrating from ap_psk.json once.
+
+    Does not generate a password. OSS boot must halt if this is None and the
+    cube is unclaimed (see missing_ap_psk_repl_lines).
+    """
+    nvs = _get_nvs()
+    buffer = bytearray(64)
+    try:
+        size = nvs.get_blob(AP_PSK_KEY, buffer)
+        if size:
+            psk = _normalize_ap_psk(buffer[:size].decode())
+            if psk:
+                return psk
+    except OSError:
+        pass
+    except ValueError:
+        pass
+
+    file_raw = _read_ap_psk_file()
+    if file_raw:
+        try:
+            psk = store_ap_psk(file_raw)
+            with suppress(OSError):
+                os.remove(AP_PSK_FILE)
+            print("SoftAP PSK=%s" % psk)
+            return psk
+        except ValueError:
+            print("ap_psk.json is not a valid SoftAP password")
+    return None
+
+
+def normalize_api_url(raw):
+    """Return trailing-slash API base or None."""
+    url = str(raw or "").strip()
+    if "://" not in url:
+        return None
+    return url.rstrip("/") + "/"
+
+
+def store_api_url(raw):
+    """Persist claim/config API base in NVS. Does not copy ap_psk into the blob."""
+    url = normalize_api_url(raw)
+    if not url:
+        raise ValueError("api_url")
+    data = load_credentials() or {}
+    data["api_url"] = url
+    _write_to_nvs(data)
+    return url
+
+
+def load_api_url():
+    """NVS api_url, migrating api_url.txt once. None → caller uses production default."""
+    data = load_credentials() or {}
+    url = normalize_api_url(data.get("api_url"))
+    if url:
+        return url
+    try:
+        with open(API_URL_FILE) as f:
+            raw = f.read()
+        url = store_api_url(raw)
+        with suppress(OSError):
+            os.remove(API_URL_FILE)
+        return url
+    except OSError:
+        return None
+    except ValueError:
+        print("api_url.txt is not a valid URL")
+        return None
+
+
+def missing_ap_psk_repl_lines():
+    """Exact REPL halt copy when unclaimed and NVS has no ap_psk."""
+    return (
+        "=" * 48,
+        "FATAL: no SoftAP join password (NVS ap_psk).",
+        "  The open-source image will not invent one at boot.",
+        "  On the host, next to the justfile:",
+        "    just gen-ap-psk",
+        "    just put-ap-psk",
+        "  Then power-cycle. Join FlipBuddy-XXXX with that password.",
+        "  Reflash (BOOT button + erase-flash) wipes NVS; generate again.",
+        "=" * 48,
+    )
+
+
+def print_missing_ap_psk_repl():
+    for line in missing_ap_psk_repl_lines():
+        print(line)
+
+
+def chip_id_hex():
+    """machine.unique_id() as lowercase hex (claim chip_id)."""
+    try:
+        import machine
+
+        uid = machine.unique_id()
+        if hasattr(uid, "hex"):
+            return uid.hex().lower()
+        from binascii import hexlify
+
+        return hexlify(uid).decode().lower()
+    except Exception:
+        return ""
+
+
+def ap_ssid():
+    """SoftAP SSID FlipBuddy- + last 4 hex of unique_id (uppercase)."""
+    hx = (chip_id_hex() or "0000").upper()
+    return "FlipBuddy-" + hx[-4:]
+
+
+def maintenance_ssid():
+    """Claimed USB-face SSID: unique if ap_psk exists, else legacy FlipBuddy."""
+    if load_ap_psk():
+        return ap_ssid()
+    return "FlipBuddy"
+
+
 def store_wifi_profile(profile_name, ssid, password, hidden=False):
     """
-    Add or update one wifi.* profile in NVS.
+    Add or update one wifi.* profile in NVS only (never a filesystem file).
 
     Empty password on update keeps the previous password (UI never echoes it).
+    Allowed before device_id exists (pairing SoftAP).
     Does not touch device_id / device_token.
     """
     name = (profile_name or "").strip() or "default"
@@ -157,8 +424,6 @@ def store_wifi_profile(profile_name, ssid, password, hidden=False):
         raise ValueError("password too long")
 
     data = load_credentials() or {}
-    if not data.get("device_id"):
-        raise ValueError("no device credentials in NVS")
 
     wifi = data.get("wifi")
     if not isinstance(wifi, dict):
@@ -204,7 +469,10 @@ def default_ap_psk(device_id):
 
 
 def get_ap_psk():
-    """SoftAP WPA2-PSK from device_id. Ignores custom unlock PIN."""
+    """SoftAP WPA2-PSK: NVS ap_psk, else claimed-legacy FB+device_id."""
+    psk = load_ap_psk()
+    if psk:
+        return psk
     data = load_credentials() or {}
     return default_ap_psk(data.get("device_id") or "")
 

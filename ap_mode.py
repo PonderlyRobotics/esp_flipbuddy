@@ -30,6 +30,7 @@ import network
 import uasyncio as asyncio
 import utime as time
 from credentials import (
+    forget_account,
     get_ap_psk,
     get_ap_unlock_pin,
     load_credentials,
@@ -49,6 +50,53 @@ AP_SUBNET = "255.255.255.0"
 USB_VOLTAGE_THRESHOLD = 4.3
 _MAX_PIN_ATTEMPTS = 8
 _UNLOCK_IDLE_MS = 5 * 60 * 1000
+
+# Shared SoftAP captive-portal look (maintenance + pairing).
+PORTAL_CSS = (
+    "body{font-family:Arial,sans-serif;margin:0;background:#f6f7f9;color:#111}"
+    ".top-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;"
+    "justify-content:space-between;padding:10px 14px;background:#111827;"
+    "color:#f9fafb;font-size:14px}"
+    ".brand{font-weight:bold}.status{flex:1;display:flex;flex-wrap:wrap;"
+    "gap:12px;justify-content:center}"
+    ".batt-ok{color:#86efac}.batt-low{color:#fca5a5}.batt-usb{color:#93c5fd}"
+    ".reset-btn{background:#dc2626;color:#fff;padding:8px 12px;border-radius:4px;"
+    "text-decoration:none}"
+    ".content{max-width:720px;margin:0 auto;padding:16px}"
+    ".card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;"
+    "padding:16px;margin:16px 0}"
+    ".card.settings{border-color:#86efac}"
+    ".flash{padding:10px;border-radius:8px;margin:12px 0}"
+    ".flash-ok{background:#ecfdf5;border:1px solid #6ee7b7}"
+    ".flash-err{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}"
+    ".ok{color:#047857;font-weight:600}"
+    ".form label{display:block;margin:10px 0}"
+    ".form input,.form select{display:block;width:100%;max-width:360px;"
+    "margin-top:4px;padding:8px;box-sizing:border-box}"
+    ".form .check{display:flex;align-items:center;gap:8px}"
+    ".form .check input{width:auto}"
+    ".form button{margin-top:8px;margin-right:8px;padding:10px 14px;border:0;"
+    "border-radius:6px;background:#2563eb;color:#fff}"
+    ".form button.secondary{background:#4b5563}"
+    ".wifi-table,.log-table{width:100%;border-collapse:collapse;font-size:13px}"
+    ".wifi-table td,.wifi-table th,.log-table td,.log-table th{"
+    "border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top}"
+    ".wifi-table th,.log-table th{background:#f3f4f6}"
+    ".log-wrap{overflow-x:auto;background:#fff;border-radius:8px;"
+    "border:1px solid #e5e7eb}"
+    ".faces{display:flex;flex-wrap:wrap;justify-content:center;gap:12px}"
+    ".face{box-sizing:border-box;width:132px;height:112px;padding:12px 10px;"
+    "border:1px solid #ccc;border-radius:8px;text-align:center;display:flex;"
+    "flex-direction:column;justify-content:center;align-items:center;overflow:hidden}"
+    ".face-orient{font-size:13px;font-weight:700;text-transform:capitalize;"
+    "margin-bottom:6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap}"
+    ".face-act{font-size:13px;line-height:1.25;max-width:100%;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap}"
+    ".muted{color:#6b7280;font-size:13px}"
+    ".foot{margin:24px 0 8px;text-align:center}"
+    "h1,h2{margin:8px 0 12px}h3{margin-top:1.4em}"
+)
 
 
 def _is_alnum_char(c):
@@ -372,6 +420,8 @@ class ApModeFSM(BaseFSM):
                 await self._reply_redirect(writer, "/")
             elif path == "/pin" and method == "POST":
                 await self._handle_pin_change(writer, form)
+            elif path == "/forget" and method == "POST":
+                await self._handle_forget(writer, form)
             elif path == "/led-test" and method == "POST":
                 if not self.is_unlocked():
                     self._set_flash("Unlock first", ok=False)
@@ -429,6 +479,33 @@ class ApModeFSM(BaseFSM):
         except Exception as e:
             self._set_flash("Save failed: %s" % e, ok=False)
         await self._reply_redirect(writer, "/")
+
+    async def _handle_forget(self, writer, form):
+        """PIN-gated: wipe device_id/token, keep ap_psk, reboot unclaimed."""
+        if not self.is_unlocked():
+            self._set_flash("Unlock first", ok=False)
+            await self._reply_redirect(writer, "/")
+            return
+        confirm = (form.get("confirm") or "").strip().lower()
+        if confirm not in ("1", "on", "yes", "true"):
+            self._set_flash("Tick the box to forget the FlipBuddy account", ok=False)
+            await self._reply_redirect(writer, "/")
+            return
+        keep_wifi = (form.get("keep_wifi") or "1") in ("1", "on", "true", "yes")
+        try:
+            forget_account(keep_wifi=keep_wifi)
+        except Exception as e:
+            self._set_flash("Forget failed: %s" % e, ok=False)
+            await self._reply_redirect(writer, "/")
+            return
+        await writer.awrite(
+            "HTTP/1.1 200 OK\r\nContent-type: text/plain\r\nConnection: close\r\n\r\n"
+            "Account forgotten. Rebooting into pairing..."
+        )
+        await writer.drain()
+        await writer.aclose()
+        await asyncio.sleep(1)
+        machine.reset()
 
     async def _handle_reset(self, writer):
         # Not PIN protected
@@ -682,6 +759,17 @@ class ApModeFSM(BaseFSM):
                 '<button type="submit">Run LED test</button>'
                 "</form>"
                 '<p class="muted">Same cycle / bounce / fade sequence as first boot.</p>'
+                "<h3>Forget FlipBuddy account</h3>"
+                '<p class="muted">Wipes the cube login. Keeps the Wi-Fi join password '
+                "(SoftAP PSK). Then pair again in the app. Unlock required.</p>"
+                '<form method="POST" action="/forget" class="form" '
+                "onsubmit=\"return confirm('Forget this FlipBuddy account on the cube?');\">"
+                '<label class="check"><input type="checkbox" name="confirm" value="1" required> '
+                "I want to unpair this cube</label>"
+                '<label class="check"><input type="checkbox" name="keep_wifi" value="1" checked> '
+                "Keep house Wi-Fi on the cube</label>"
+                '<button type="submit" class="secondary">Forget FlipBuddy account</button>'
+                "</form>"
                 '<form method="POST" action="/lock" class="form">'
                 '<button type="submit" class="secondary">Lock settings</button>'
                 "</form>"
@@ -714,43 +802,7 @@ class ApModeFSM(BaseFSM):
         page = """<!DOCTYPE html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FlipBuddy</title>
-<style>
-body{font-family:Arial,sans-serif;margin:0;background:#f6f7f9;color:#111}
-.top-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;
-padding:10px 14px;background:#111827;color:#f9fafb;font-size:14px}
-.brand{font-weight:bold}.status{flex:1;display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
-.batt-ok{color:#86efac}.batt-low{color:#fca5a5}.batt-usb{color:#93c5fd}
-.reset-btn{background:#dc2626;color:#fff;padding:8px 12px;border-radius:4px;text-decoration:none}
-.content{max-width:720px;margin:0 auto;padding:16px}
-.card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin:16px 0}
-.card.settings{border-color:#86efac}
-.flash{padding:10px;border-radius:8px;margin:12px 0}
-.flash-ok{background:#ecfdf5;border:1px solid #6ee7b7}
-.flash-err{background:#fef2f2;border:1px solid #fca5a5;color:#991b1b}
-.ok{color:#047857;font-weight:600}
-.form label{display:block;margin:10px 0}
-.form input{display:block;width:100%;max-width:360px;margin-top:4px;padding:8px;box-sizing:border-box}
-.form .check{display:flex;align-items:center;gap:8px}
-.form .check input{width:auto}
-.form button{margin-top:8px;margin-right:8px;padding:10px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff}
-.form button.secondary{background:#4b5563}
-.wifi-table,.log-table{width:100%;border-collapse:collapse;font-size:13px}
-.wifi-table td,.wifi-table th,.log-table td,.log-table th{
-border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top}
-.wifi-table th,.log-table th{background:#f3f4f6}
-.log-wrap{overflow-x:auto;background:#fff;border-radius:8px;border:1px solid #e5e7eb}
-.faces{display:flex;flex-wrap:wrap;justify-content:center;gap:12px}
-.face{box-sizing:border-box;width:132px;height:112px;padding:12px 10px;border:1px solid #ccc;
-border-radius:8px;text-align:center;display:flex;flex-direction:column;justify-content:center;
-align-items:center;overflow:hidden}
-.face-orient{font-size:13px;font-weight:700;text-transform:capitalize;margin-bottom:6px;
-max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.face-act{font-size:13px;line-height:1.25;max-width:100%;overflow:hidden;
-text-overflow:ellipsis;white-space:nowrap}
-.muted{color:#6b7280;font-size:13px}
-.foot{margin:24px 0 8px;text-align:center}
-h3{margin-top:1.4em}
-</style></head><body>
+<style>__CSS__</style></head><body>
 <div class="top-bar">
   <span class="brand">FlipBuddy</span>
   <div class="status">
@@ -770,7 +822,8 @@ h3{margin-top:1.4em}
 </div>
 </body></html>"""
         return (
-            page.replace("__DT__", _esc(dt))
+            page.replace("__CSS__", PORTAL_CSS)
+            .replace("__DT__", _esc(dt))
             .replace("__BC__", _esc(bc))
             .replace("__BATT__", _esc(batt["label"]))
             .replace("__RESET__", reset_btn)

@@ -71,6 +71,31 @@ def test_tracking_log_html_table():
     assert "Duration" in html
 
 
+def test_unlocked_html_has_forget_account():
+    import credentials
+
+    credentials._write_to_nvs(
+        {
+            "device_id": "devABCDEF123456",
+            "device_token": "tok",
+            "wifi": {},
+        }
+    )
+    tracker = SimpleNamespace(running={"tracking_log": {}})
+    for face in ("front", "back", "left", "right", "top", "bottom"):
+        setattr(
+            tracker,
+            face,
+            SimpleNamespace(led_color="#fff", activity_name=face),
+        )
+    fsm = ap_mode.ApModeFSM(config=MagicMock(), tracker=tracker)
+    fsm._unlocked = True
+    fsm._unlock_at_ms = 0
+    html = fsm.generate_html()
+    assert "/forget" in html
+    assert "Forget FlipBuddy account" in html
+
+
 def test_show_softap_leds_lights_back_cutout_yellow():
     class NP:
         def __init__(self):

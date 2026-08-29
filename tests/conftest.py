@@ -5,6 +5,7 @@ from __future__ import annotations
 import json as stdjson
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import gc as _host_gc
@@ -55,6 +56,7 @@ def _ensure_micropython_shims():
         machine.reset = MagicMock()
         machine.soft_reset = MagicMock()
         machine.deepsleep = MagicMock()
+        machine.unique_id = MagicMock(return_value=b"\xaa\xbb\xcc\xdd\xee\xff")
         machine.Pin = MagicMock
         machine.ADC = MagicMock
         machine.RTC = MagicMock
@@ -244,17 +246,30 @@ def _clear_nvs_store():
         store.clear()
 
 
+_SECRET_FS_NAMES = frozenset(
+    ("credentials.json", "ap_psk.json", "api_url.txt")
+)
+
+
 @pytest.fixture(autouse=True)
 def _ignore_workspace_credentials_json(monkeypatch):
-    """load_credentials() reads ./credentials.json; keep host tests on NVS only."""
+    """Keep host tests on NVS; do not read repo-root secret files."""
     import builtins
 
     real_open = builtins.open
+    repo = Path(__file__).resolve().parents[1]
 
     def guarded(path, *args, **kwargs):
         name = path if isinstance(path, str) else getattr(path, "name", path)
-        if str(name) == "credentials.json":
-            raise OSError(2, "No such file")
+        p = Path(str(name))
+        if p.name in _SECRET_FS_NAMES:
+            resolved = p if p.is_absolute() else (Path.cwd() / p)
+            try:
+                resolved = resolved.resolve()
+            except OSError:
+                pass
+            if resolved.parent == repo:
+                raise OSError(2, "No such file")
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", guarded)
@@ -283,7 +298,7 @@ def _reset_nvs():
         if hasattr(wlan, "status_code"):
             wlan.status_code = 0
     # Drop cached project modules so they re-bind to fresh NVS
-    for mod in ("credentials", "ap_mode", "network_helper", "ap_session"):
+    for mod in ("credentials", "ap_mode", "network_helper", "ap_session", "pairing"):
         sys.modules.pop(mod, None)
     yield
     _clear_nvs_store()

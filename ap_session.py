@@ -38,11 +38,12 @@ def _bringup_softap():
 
     gc.collect()
     print("ap_session: mem_free before active", gc.mem_free())
-    from credentials import get_ap_psk
+    from credentials import get_ap_psk, maintenance_ssid
 
     psk = get_ap_psk()
+    ssid = maintenance_ssid()
     ap.active(True)
-    ap.config(essid=AP_SSID, authmode=network.AUTH_WPA_WPA2_PSK, password=psk)
+    ap.config(essid=ssid, authmode=network.AUTH_WPA_WPA2_PSK, password=psk)
     ap.ifconfig((AP_IP, AP_SUBNET, AP_IP, AP_IP))
     print("ap_session: SoftAP OK", ap.ifconfig(), "mem_free", gc.mem_free())
     print("ap_session: SoftAP PSK=%s" % psk)
@@ -89,9 +90,11 @@ async def _portal(ap):
     )
     await fsm.run()
 
+    from credentials import maintenance_ssid
+
     print(
         "ap_session: portal up %ds - join WiFi '%s' (WPA2) -> http://%s/"
-        % (AP_DURATION_S, AP_SSID, AP_IP)
+        % (AP_DURATION_S, maintenance_ssid(), AP_IP)
     )
     for i in range(AP_DURATION_S):
         await asyncio.sleep(1)

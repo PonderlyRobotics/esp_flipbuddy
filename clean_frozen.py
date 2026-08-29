@@ -124,6 +124,8 @@ def main():
         "ap_mode.py",
         "ap_session.py",
         "credentials.py",
+        "pairing.py",
+        "pairing_portal.py",
     ]
     for f in files:
         src = src_dir / f

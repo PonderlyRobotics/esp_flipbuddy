@@ -162,6 +162,7 @@ class Config(FileSystem):
             "orientation_check_frequency": 10,
             "remote_server": "https://api.flipbuddy.app",
             "ap_mode_enabled": True,
+            "pairing_identify": False,
         },
         "device": {},
     }
@@ -215,6 +216,9 @@ class Config(FileSystem):
                         ],
                         "ota_enabled": config["settings"]["ota_enabled"],
                         "remote_server": config["settings"]["remote_server"],
+                        "pairing_identify": bool(
+                            config["settings"].get("pairing_identify", False)
+                        ),
                     }
                 )
 

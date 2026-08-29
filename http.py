@@ -141,7 +141,9 @@ async def async_http_post(url, data, headers=None, timeout=5):
         status_line = response[: response.find(b"\r\n")].decode()
         print("Status:", status_line)
 
-        if "200" in status_line:
+        parts = status_line.split()
+        code = parts[1] if len(parts) > 1 else ""
+        if code in ("200", "201"):
             return response[header_end + 4 :].decode()
         return None
 

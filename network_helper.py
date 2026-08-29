@@ -142,7 +142,7 @@ def start_softap(essid, ip, subnet, authmode, settle_ms=250, retries=3, password
 
 
 def _wifi_configs():
-    """Return ordered list of wifi dicts from credentials (NVS/file)."""
+    """Return ordered list of wifi dicts from NVS credentials."""
     creds = load_credentials() or {}
     configs = []
     for _key, value in creds.get("wifi", {}).items():
