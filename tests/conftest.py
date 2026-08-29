@@ -47,6 +47,7 @@ def _ensure_micropython_shims():
     utime.sleep_ms = lambda ms: None
     utime.ticks_ms = lambda: int(real_time.time() * 1000)
     utime.ticks_diff = lambda a, b: a - b
+    utime.ticks_add = lambda a, b: a + b
     utime.mktime = real_time.mktime
 
     if "machine" not in sys.modules:

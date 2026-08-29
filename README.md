@@ -13,7 +13,7 @@ I thought it would take a weekend. It took months. That is fine. Still a simple 
 Hackaday wrote about the project:  
 https://hackaday.com/2026/08/07/flipbuddy-is-borg-you-will-be-assimilated/
 
-This repository is the open DIY build. Firmware tree is **0.1.5** (MicroPython **1.28** frozen set). The last published GitHub image is still **0.1.4** / MicroPython 1.27 until a 0.1.5 Release is cut. It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
+This repository is the open DIY build. Firmware is **0.1.5** (MicroPython **1.28** frozen set). It runs on a stock ESP32-S3 (Super Mini class works well) with MicroPython. The shell STLs and assembly PDF are here too. I publish it under **Ponderly Robotics** and work on it when evenings allow, so please treat it as a hobby project, not a product with phone support.
 
 <p align="center">
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
@@ -23,7 +23,7 @@ If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assem
 
 | | |
 |--|--|
-| Firmware image | `esp32_s3_flipbuddy_0.1.4.bin` on GitHub Releases (MicroPython 1.27; helpers frozen in; not in git) |
+| Firmware image | `esp32_s3_flipbuddy_0.1.5.bin` on GitHub Releases (MicroPython 1.28; helpers frozen in; not in git) |
 | Enclosure | [stl/](./stl/) |
 | Assembly | [FlipBuddy Assembly guide.pdf](./FlipBuddy%20Assembly%20guide.pdf) |
 | Software license | [MIT](./LICENSE) |
@@ -40,7 +40,7 @@ The design is for minutes and hours, not a stopwatch. It prefers boards you can 
 - [Battery (rough)](#battery-rough)
 - [Getting started](#getting-started)
   - [Serial port and board](#serial-port-and-board-justfile)
-  - [Fast track (v0.1.4)](#fast-track-v013)
+  - [Fast track (v0.1.5)](#fast-track-v015)
   - [DIY path](#diy-path)
 - [Assembly, printing, and parts](#assembly-printing-and-parts)
 - [Web app](#web-app)
@@ -77,7 +77,7 @@ USB-C face up can open **SoftAP maintenance mode** (local captive portal — see
 
 When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
 
-Full SoftAP needs the portal modules on the device: the **0.1.4** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
+Full SoftAP needs the portal modules on the device: the **0.1.5** frozen Release image (or later), **or** DIY/`just diy` (full source upload). Fast track only pushes `main.py` + credentials on top of the frozen set. Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
 
 | | |
 |--|--|
@@ -208,34 +208,34 @@ just env
 
 The Release fast-track image is ESP32-S3 only. Other chips need the DIY path. Commands below use `/dev/ttyACM0` and `esp32s3`; change them if you are not using `just`.
 
-### Fast track (v0.1.4)
+### Fast track (v0.1.5)
 
 Helpers (including SoftAP portal modules) are frozen into the image. You only place `main.py` and `credentials.json` on the filesystem so you can tweak the entrypoint without rebuilding MicroPython.
 
 | | |
 |--|--|
-| Image | `esp32_s3_flipbuddy_0.1.4.bin` from GitHub **Releases** |
+| Image | `esp32_s3_flipbuddy_0.1.5.bin` from GitHub **Releases** |
 | Checksum | Matching `.bin.sha256` or `SHA256SUMS` on the same release |
-| Runtime | MicroPython 1.27 |
+| Runtime | MicroPython 1.28 |
 | Board | ESP32-S3 Super Mini class with battery charger |
 
 #### 1. Download, verify, flash
 
 Use this README for flashing. The assembly PDF is for mechanics; if it only mentions stock MicroPython, prefer the frozen Release image for Super Mini.
 
-On GitHub: **Releases** → tag **v0.1.4** (or latest 0.1.x). Download the `.bin` and checksum file.
+On GitHub: **Releases** → tag **v0.1.5** (or latest 0.1.x). Download the `.bin` and checksum file.
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.1.4.bin.sha256
+sha256sum -c esp32_s3_flipbuddy_0.1.5.bin.sha256
 
 esptool --chip esp32s3 --port /dev/ttyACM0 erase-flash
-esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.4.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 esp32_s3_flipbuddy_0.1.5.bin
 ```
 
 Or, with the file in the repo directory:
 
 ```bash
-just flash-firmware esp32_s3_flipbuddy_0.1.4.bin
+just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
 ```
 
 #### 2. Credentials
@@ -445,5 +445,5 @@ If you want to use the enclosure designs commercially, please ask first. The non
 - [docs/media/](./docs/media/)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [SECURITY.md](./SECURITY.md)
-- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.4.md](./docs/RELEASE_NOTES_v0.1.4.md)
+- [docs/CHANGELOG.md](./docs/CHANGELOG.md), [docs/NOTICE](./docs/NOTICE), [docs/RELEASE_NOTES_v0.1.5.md](./docs/RELEASE_NOTES_v0.1.5.md)
 - [LICENSE](./LICENSE), [LICENSE-HARDWARE](./LICENSE-HARDWARE)

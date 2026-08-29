@@ -138,6 +138,7 @@ class FaceLEDBase:
     def active(self):
         """Activate the LED effect according to the current mode."""
         self.status = "ACTIVE"
+        self._stop = False
         if self.mode == "static":
             self.set_static_color()
         elif self.mode == "blinking":

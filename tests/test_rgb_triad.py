@@ -1,5 +1,7 @@
 """Host tests for cutout triad static lighting (SoftAP USB-face indicator)."""
 
+from unittest.mock import MagicMock, patch
+
 import rgb
 
 pinout = rgb.pinout
@@ -46,6 +48,20 @@ def test_front_cutout_triad_does_not_light_back_cutout_leds():
     assert np[pinout["back"]["led"]] == (0, 0, 0)
     assert np[pinout["bottom"]["led"]] == (0, 0, 0)
     assert np[pinout["right"]["led"]] != (0, 0, 0)
+
+
+def test_active_clears_stop_so_blink_can_start_after_inactive():
+    """After inactive(), active() must still be able to start blinking."""
+    from rgb import FaceLEDNeoPixel
+
+    np = _NP()
+    led = FaceLEDNeoPixel("front", np, mode="blinking", hex_code="#FFFF00")
+    led._stop = True
+    led.task = None
+    with patch("rgb.asyncio.create_task", return_value=MagicMock()) as ct:
+        led.active()
+    assert led._stop is False
+    ct.assert_called()
 
 
 def test_softap_indicator_disabled_is_noop():

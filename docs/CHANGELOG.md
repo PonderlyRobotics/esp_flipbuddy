@@ -10,10 +10,11 @@ Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050
 - **SoftAP WPA2-PSK:** join password `FB` + last 6 alnum of `device_id`; portal remains `http://10.20.30.40/`
 - **SoftAP USB-face LEDs:** solid yellow (`#FFFF00`) on the back-cutout triad (left / back / bottom)
 - **Cutout triad:** `front_cutout` is right/top/front; `back_cutout` is left/back/bottom (physical corners; 0.1.3 map was swapped)
-- **Live face preview:** after the 7 s assigned-face map, MPU6050 5 Hz preview until ~10 s still (or 40 s timeout)
-- **Frozen 1.28 image:** includes `ap_session` and the current helpers
+- **Live face preview:** after the 7 s assigned-face map, MPU6050 5 Hz preview until **10 s still** (wall-clock), then the usual tracking blink, then upload if needed and/or deep sleep
+- **Pickup blink:** after the assigned-face map and 10 s still, the cube does the usual tracking blink (not only on the next wake)
+- **Frozen 1.28 image:** includes `ap_session` and the current helpers (IDF 5.5.1)
 
-Local frozen image (not a GitHub Release yet): `build/esp32_s3_flipbuddy_0.1.5.bin` (IDF 5.5.1). Last published GitHub image remains `esp32_s3_flipbuddy_0.1.4.bin` (MicroPython 1.27).
+Frozen Release image: `esp32_s3_flipbuddy_0.1.5.bin`. Full reflash recommended. See [RELEASE_NOTES_v0.1.5.md](./RELEASE_NOTES_v0.1.5.md).
 
 ## 0.1.4 (2026-08-08)
 

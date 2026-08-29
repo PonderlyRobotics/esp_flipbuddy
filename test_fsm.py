@@ -22,6 +22,7 @@ import json as stdjson
 import sys
 import time as real_time
 import types
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch, AsyncMock
 
 # ------------------------------------------------------------------
@@ -45,6 +46,7 @@ sys.modules["utime"].sleep = real_time.sleep
 sys.modules["utime"].sleep_ms = lambda ms: real_time.sleep(ms / 1000.0)
 sys.modules["utime"].ticks_ms = lambda: int(real_time.time() * 1000)
 sys.modules["utime"].ticks_diff = lambda a, b: a - b
+sys.modules["utime"].ticks_add = lambda a, b: a + b
 sys.modules["utime"].localtime = real_time.localtime
 sys.modules["utime"].mktime = real_time.mktime
 
@@ -380,32 +382,59 @@ async def test_activefsm_upload_needed_logic():
     assert active.need_upload is True
 
 
+class _SettleClock:
+    def __init__(self):
+        self.ms = 0
+
+    def ticks_ms(self):
+        return self.ms
+
+    def ticks_diff(self, a, b):
+        return a - b
+
+    def ticks_add(self, a, b):
+        return a + b
+
+
+@contextmanager
 def _patch_settle_hw(wake=None, samples=None):
-    """Patch ActiveFSM settle: wake reason, MPU sample helper, sleep, WDT."""
+    """Patch ActiveFSM settle: wake reason, MPU sample helper, 5 Hz clock."""
     if wake is None:
         wake = main.PIN_WAKE
     seq = list(samples or [((0.0, 1.0, 0.0), "front")])
+    clock = _SettleClock()
+    last = ((0.0, 1.0, 0.0), "front")
 
     def _next(*_a, **_k):
+        nonlocal last
         if seq:
-            return seq.pop(0)
-        return ((0.0, 1.0, 0.0), "front")
+            last = seq.pop(0)
+        return last
 
-    return (
+    async def _sleep_ms(n):
+        clock.ms += int(n)
+
+    with (
         patch("main.wake_reason", return_value=wake),
         patch("main.sensor_init", return_value=MagicMock()),
         patch("main._read_mpu_settle", side_effect=_next),
         patch("main.wdt_feed"),
-        patch("main.asyncio.sleep_ms", new_callable=AsyncMock, create=True),
-    )
+        patch("main.asyncio.sleep_ms", _sleep_ms, create=True),
+        patch.object(main.time, "ticks_ms", clock.ticks_ms),
+        patch.object(main.time, "ticks_diff", clock.ticks_diff),
+        patch.object(main.time, "ticks_add", clock.ticks_add),
+    ):
+        yield clock
 
 
 async def test_activefsm_settle_timer_wake_is_single_sample():
     cfg = make_fake_config()
     trk = make_fake_tracker()
     active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
-    patches = _patch_settle_hw(wake=0, samples=[((0.0, 1.0, 0.0), "front")])
-    with patches[0], patches[1], patches[2], patches[3], patches[4] as sleep_ms:
+    with (
+        _patch_settle_hw(wake=0, samples=[((0.0, 1.0, 0.0), "front")]),
+        patch("main.asyncio.sleep_ms", new_callable=AsyncMock, create=True) as sleep_ms,
+    ):
         await active.settle_face()
     assert active.face_obj is trk.front
     sleep_ms.assert_not_called()
@@ -420,8 +449,7 @@ async def test_activefsm_settle_commits_assigned_face_after_fifty_samples():
     active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
     n = SETTLE_STABLE_SAMPLES
     samples = [((0.0, 1.0, 0.0), "front")] * n
-    patches = _patch_settle_hw(samples=samples)
-    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+    with _patch_settle_hw(samples=samples):
         await active.settle_face()
     assert active.face_obj is trk.front
     assert trk.front.led.status == "ACTIVE"
@@ -438,8 +466,7 @@ async def test_activefsm_settle_rotation_switches_preview_led():
     samples = [((0.0, 1.0, 0.0), "front")] * 2 + [
         ((0.0, 0.0, -1.0), "right")
     ] * SETTLE_STABLE_SAMPLES
-    patches = _patch_settle_hw(samples=samples)
-    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+    with _patch_settle_hw(samples=samples):
         await active.settle_face()
     assert active.face_obj is trk.right
     assert trk.right.led.status == "ACTIVE"
@@ -459,8 +486,7 @@ async def test_activefsm_settle_out_margin_does_not_error():
         ((0.0, 0.0, 0.0), "out_margin"),
         ((0.0, 0.0, 0.0), "out_margin"),
     ] + [((0.0, 1.0, 0.0), "front")] * SETTLE_STABLE_SAMPLES
-    patches = _patch_settle_hw(samples=samples)
-    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+    with _patch_settle_hw(samples=samples):
         await active.settle_face()
     trk.out_margin.led.error_led.assert_not_called()
     assert active.face_obj is trk.front
@@ -475,15 +501,7 @@ async def test_activefsm_settle_timeout_skips_tracking_without_error():
     active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
     n = SETTLE_HZ * 1 + 2
     samples = [((0.0, 0.0, 0.0), "out_margin")] * n
-    patches = _patch_settle_hw(samples=samples)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patch("main.SETTLE_TIMEOUT_S", 1),
-    ):
+    with _patch_settle_hw(samples=samples), patch("main.SETTLE_TIMEOUT_S", 1):
         await active.settle_face()
     assert active.face_obj is None
     trk.out_margin.led.error_led.assert_not_called()

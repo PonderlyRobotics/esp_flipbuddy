@@ -114,6 +114,7 @@ DEFAULT_UPLOAD_FRQ = const(300)  # seconds
 DEFAULT_OTA = const(7)  # days
 DEFAULT_INDICATOR_BLINK_DURATION = const(7000)  # ms
 DEFAULT_INDICATOR_BLINK_CYCLE = const(1)
+SETTLE_STILL_MS = const(10000)  # wall-clock still-hold after landing on a face
 MAX_SLEEP_TIME = const(900)  # seconds
 FACES = const(("front", "back", "left", "right", "top", "bottom"))
 
@@ -889,26 +890,30 @@ class ActiveFSM(BaseFSM):
         prev_accel = None
         prev_face = None
         stable_count = 0
-        max_samples = SETTLE_HZ * SETTLE_TIMEOUT_S
+        still_start = None
+        deadline = time.ticks_add(time.ticks_ms(), SETTLE_TIMEOUT_S * 1000)
         period_ms = 1000 // SETTLE_HZ
-        for _ in range(max_samples):
-            t0 = time.ticks_ms()
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
             wdt_feed()
             accel, face = _read_mpu_settle(s)
             step = settle_step(prev_accel, accel, face, prev_face, stable_count)
             prev_accel = accel
             prev_face = step["face"]
             stable_count = step["stable_count"]
-            if step["face"] != "out_margin":
+            now = time.ticks_ms()
+            if step["face"] == "out_margin":
+                still_start = None
+            else:
                 await self._preview_switch(step["face"])
-            if step["committed"]:
-                self.face_obj = self._face_from_name(step["face"])
-                dprint("ActiveFSM settle →", step["face"])
-                return
-            elapsed = time.ticks_diff(time.ticks_ms(), t0)
-            remain = period_ms - elapsed
-            if remain > 0:
-                await asyncio.sleep_ms(remain)
+                if step["moved"]:
+                    still_start = now
+                elif still_start is None:
+                    still_start = now
+                elif time.ticks_diff(now, still_start) >= SETTLE_STILL_MS:
+                    self.face_obj = self._face_from_name(step["face"])
+                    dprint("ActiveFSM settle →", step["face"])
+                    return
+            await asyncio.sleep_ms(period_ms)
 
         dprint("ActiveFSM settle timeout — skip tracking")
         await self._clear_preview()
@@ -1004,8 +1009,9 @@ class ActiveFSM(BaseFSM):
         dprint(self.face_obj)
         if self.face_obj:
             await self.tracker.start_tracking(self.face_obj)
-            # Preview left a solid LED; drop it so tracking blink actually starts.
+            # Solid preview must end before the tracking blink.
             await self._clear_preview()
+            self.face_obj.led._stop = False
             self.face_obj.led.active()
             t = self.face_obj.led.get_total_blink_time()
             await asyncio.sleep(t * 2)  # two cycles
