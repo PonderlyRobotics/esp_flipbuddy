@@ -19,7 +19,7 @@ This repository is the open DIY build. Firmware is **0.1.5** (MicroPython **1.28
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
 </p>
 
-If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assembly%20guide.pdf), the files in [stl/](./stl/), the firmware `.bin` from GitHub Releases, then `main.py` and your `credentials.json`. You can ignore `scripts/`, pre-commit, and the rest of the host tooling. People changing the code should read [CONTRIBUTING.md](./CONTRIBUTING.md).
+If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assembly%20guide.pdf), the files in [stl/](./stl/), the firmware `.bin` from GitHub Releases, then `just fast-track` (`main.py` + a host SoftAP password). Dashboard JSON is recovery, not the first step. You can ignore `scripts/`, pre-commit, and the rest of the host tooling. People changing the code should read [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 | | |
 |--|--|
@@ -129,7 +129,7 @@ You can find `device_id` in the downloaded `credentials.json` or in the flipbudd
 - **LED self‑test**
 - **Lock** the settings section again
 
-`device_token` is never shown or edited on SoftAP. To replace API credentials, re‑upload `credentials.json` over USB (`just put-credentials` / `just fast-track`).
+`device_token` is never shown or edited on SoftAP. To replace API credentials, re‑upload `credentials.json` over USB (`just put-credentials`). `just fast-track` does not copy that file.
 
 ## LEDs after you wake the cube
 
@@ -183,8 +183,8 @@ Build and wire the cube first ([assembly section](#assembly-printing-and-parts) 
 
 | Path | Use when | What you put on the device |
 |------|----------|----------------------------|
-| [Fast track](#fast-track-v015) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + `credentials.json` |
-| [DIY path](#diy-path) | Other boards, or you want every `.py` on the filesystem | Stock MicroPython + all sources + credentials |
+| [Fast track](#fast-track-v015) | ESP32-S3 Super Mini (or similar) with charger | Release `.bin`, then `main.py` + SoftAP password (`just fast-track`) |
+| [DIY path](#diy-path) | Other boards, or you want every `.py` on the filesystem | Stock MicroPython + all sources + SoftAP password (`just diy`) |
 
 ### Serial port and board (`justfile`)
 
@@ -210,7 +210,7 @@ The Release fast-track image is ESP32-S3 only. Other chips need the DIY path. Co
 
 ### Fast track (v0.1.5)
 
-Helpers (including SoftAP portal modules) are frozen into the image. You only place `main.py` and `credentials.json` on the filesystem so you can tweak the entrypoint without rebuilding MicroPython.
+Helpers (including SoftAP portal modules) are frozen into the image. You only place `main.py` and a host SoftAP password on the filesystem so you can tweak the entrypoint without rebuilding MicroPython. `credentials.json` is recovery (`just put-credentials`), not part of `just fast-track`.
 
 | | |
 |--|--|
@@ -238,46 +238,34 @@ Or, with the file in the repo directory:
 just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
 ```
 
-#### 2. Credentials
+#### 2. SoftAP password, then pair
 
 1. Create a free account at [flipbuddy.app](https://flipbuddy.app)
-2. Register a device and download `credentials.json`
-3. Add your Wi-Fi (people often skip this):
+2. After flash, `just fast-track` uploads `main.py`, writes a random join password, then hard-resets the cube (`just gen-ap-psk` / `just put-ap-psk` if you want the steps split). **It does not copy `credentials.json`**, even if that file is sitting next to the justfile.
+3. Join `FlipBuddy-XXXX` with the printed password. On the cube page, pick home Wi-Fi and type the 8-character dashboard pairing code.
+4. JSON download from the device page is recovery only: `just put-credentials`. That skips pairing SoftAP.
 
-```json
-{
-  "device_id": "...",
-  "device_token": "...",
-  "api_url": "https://api.flipbuddy.app/v1/api/",
-  "wifi": {
-    "home": { "ssid": "YourWiFi", "password": "secret" }
-  }
-}
-```
-
-The firmware reconnects to the last successful AP when it can; otherwise it scans for visible SSIDs. For a hidden network, set `"hidden": true` on that entry.
-
-#### 3. Upload `main.py` and credentials
-
-Put `credentials.json` next to the `justfile`, then:
+#### 3. Upload `main.py` and the join password
 
 ```bash
 just fast-track
-# same as: just put-main && just put-credentials
+# same as: just put-main, then just gen-ap-psk (if needed) && just put-ap-psk, then mpremote reset
 ```
 
-That only pushes **`main.py`** and **`credentials.json`**. Do not run `just diy` / `just upload` on the fast track unless you mean to override frozen modules.
+That only pushes **`main.py`** and **`ap_psk.json`**, then hard-resets. Do not run `just diy` / `just upload` on the fast track unless you mean to override frozen modules.
 
 Manual equivalent (if you do not use `just`):
 
 ```bash
+python3 scripts/gen_ap_psk.py
 mpremote connect /dev/ttyACM0 cp main.py :
-mpremote connect /dev/ttyACM0 cp credentials.json :
+mpremote connect /dev/ttyACM0 cp ap_psk.json :
+mpremote connect /dev/ttyACM0 reset
 ```
 
-#### 4. Power cycle
+#### 4. After pairing
 
-On first boot it will try Wi-Fi, calibrate, fetch face config, then track flips. LEDs should match dashboard colors. Use `just shell` or any 115200 serial console if something looks wrong. Shake the cube if it went to sleep.
+On first boot after a successful claim it will try Wi-Fi, calibrate, fetch face config, then track flips. LEDs should match dashboard colors. Use `just shell` or any 115200 serial console if something looks wrong. Shake the cube if it went to sleep.
 
 ### DIY path
 
@@ -291,14 +279,14 @@ esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0 ESP32_GEN
 # or: just flash-firmware ESP32_GENERIC_S3-....bin
 ```
 
-Credentials: same as fast track step 2 (`credentials.json` next to the `justfile`).
+Pairing password: same as fast track (`just diy` generates `ap_psk.json` if needed). JSON recovery remains `just put-credentials`.
 
 ```bash
 just diy
-# same as: just upload && just put-credentials
+# same as: just upload, then just gen-ap-psk (if needed) && just put-ap-psk
 ```
 
-That pushes the firmware modules listed in `device_py` plus credentials. Then power cycle.
+That pushes the firmware modules listed in `device_py` plus the SoftAP password, then hard-resets.
 
 ## Assembly, printing, and parts
 
@@ -394,13 +382,13 @@ Change faces and colors in the browser; the cube picks them up later. For two cu
 ## FAQ
 
 **I haven't charged my FlipBuddy for a long time, and now it does not connect to the dashboard.**  
-The device token is valid for up to **60 days** for security (for example if a cube is lost or stolen). Download a **fresh token** from the dashboard into a new `credentials.json`, run `just put-credentials` (or `just fast-track` if you also need to refresh `main.py`), power-cycle, and tracking can continue.
+The device token is valid for up to **60 days** for security (for example if a cube is lost or stolen). Download a **fresh token** from the dashboard into a new `credentials.json`, run `just put-credentials` (and `just put-main` if you also need a new entrypoint), power-cycle, and tracking can continue. `just fast-track` will not upload that JSON.
 
 **All six LEDs light cyan / light blue when I shake the cube.**  
 No activities are assigned on the device yet. Map faces in the free [dashboard](https://flipbuddy.app), make sure Wi‑Fi works on first sync, then shake again. Until that config is applied, the cube only shows the empty “no faces” indicator.
 
 **I flashed the frozen image but the cube never joins my Wi‑Fi.**  
-Confirm `credentials.json` includes a working `wifi` entry (`ssid` / `password`), upload it with `just put-credentials` or `just fast-track`, and that the SSID is visible (the firmware scans before connecting; use `"hidden": true` for non-broadcast networks). After flash, credentials must be re-uploaded — erase/flash clears the filesystem. Check serial with `just shell` (115200) for connect / “no credentials” messages. You can also set or fix Wi‑Fi from the [SoftAP captive portal](#softap-maintenance-mode) after PIN unlock.
+Unclaimed cubes type home Wi-Fi on the pairing page after `just fast-track`. House SSID/password stay in NVS on the cube and are never uploaded to the API. Already-claimed recovery: `just put-credentials` restores `device_id` / `device_token` only — a `wifi` entry in that JSON is ignored. After flash, NVS is empty — pair again, or set Wi‑Fi from the [SoftAP captive portal](#softap-maintenance-mode) after PIN unlock. Check serial with `just shell` (115200) for connect / missing-PSK messages.
 
 **SoftAP / `FlipBuddy` Wi‑Fi does not show up.**  
 Shake or wake the cube, put the **USB‑C port face** up, and wait a few seconds. After a SoftAP session, the cube uses a **cooldown** while still on that face — flip to another face, then USB face up again. Confirm SoftAP modules are on the device (DIY/`just diy` or a frozen image that includes the SoftAP stack). Low battery or a failed SoftAP bring‑up falls back to normal boot; serial (`just shell`) shows `ap_session` / SoftAP messages if you have a cable.

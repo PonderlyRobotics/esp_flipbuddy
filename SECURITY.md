@@ -45,13 +45,13 @@ Everyday bugs, typos, and “please add this feature” belong in **public issue
 
 ## Credentials
 
-`credentials.json` and NVS hold `device_id`, `device_token`, and Wi‑Fi secrets. Treat them like passwords. Do not commit them. `.gitignore` already blocks the usual credential JSON names; please do not force-add them.
+NVS holds `device_id`, `device_token`, and house Wi‑Fi secrets. Treat them like passwords. `credentials.json` is identity recovery only (`device_id` / `device_token`); firmware never copies house Wi‑Fi from that file onto flash or to the API. Do not commit either. `.gitignore` already blocks the usual credential JSON names; please do not force-add them.
 
 If a cube has been offline for a long time and no longer talks to the dashboard, the device token may have expired (see the README FAQ). Refresh credentials from the app and re-upload them.
 
 ## SoftAP captive portal (HTTP, PIN, Wi‑Fi)
 
-When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑reset into a temporary **WPA2‑PSK** SoftAP named **`FlipBuddy`** and serve a captive portal over **HTTP** at `http://10.20.30.40/`. Join password is **`FB` + last 6 alphanumeric characters of `device_id`** (always 8 characters; independent of a custom portal PIN). That path is intentional local maintenance: status, Wi‑Fi profile edits, setup PIN change, LED self‑test, and device reset. It is **not** a hardened remote admin interface.
+When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑reset into a temporary **WPA2‑PSK** SoftAP and serve a captive portal over **HTTP** at `http://10.20.30.40/`. Claimed cubes without a host `ap_psk` still use SSID **`FlipBuddy`** and password **`FB` + last 6 alphanumeric characters of `device_id`**. After `just gen-ap-psk`, join SSID is **`FlipBuddy-XXXX`** and the password is the printed NVS value (not derived from the MAC). Unclaimed pairing uses that same PSK and has **no PIN**; type home Wi-Fi on a desk you control (HTTP after WPA2 join). USB-face maintenance still needs the setup PIN for Wi-Fi writes. It is **not** a hardened remote admin interface.
 
 ### Risks (honest)
 

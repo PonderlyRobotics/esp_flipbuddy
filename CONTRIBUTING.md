@@ -49,9 +49,10 @@ After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same i
 | Recipe | What it does |
 |--------|----------------|
 | `just put-main` | Upload `main.py` only |
-| `just put-credentials` | Upload `credentials.json` |
-| `just fast-track` | `put-main` + `put-credentials` (frozen image path) |
-| `just diy` | `upload` + `put-credentials` (full sources on stock MP) |
+| `just gen-ap-psk` / `just put-ap-psk` | Host SoftAP join password (pairing) |
+| `just put-credentials` | Upload `credentials.json` (recovery; skips pairing SoftAP) |
+| `just fast-track` | `put-main` + PSK (frozen image path; does **not** copy JSON) |
+| `just diy` | `upload` + PSK (full sources on stock MP; does **not** copy JSON) |
 | `just upload` | Copy firmware modules (`device_py`) to the device |
 | `just pull-nvs-state` | Dump config/tracker from NVS to local JSON |
 | `just flash-firmware` | Erase and flash a `.bin` |
@@ -77,8 +78,9 @@ just test
 **Device deploy (DIY / full SoftAP stack on filesystem):**
 
 ```bash
-just diy          # or: just upload && just put-credentials
-# frozen image path: just put-main (and put-credentials if needed)
+just diy          # or: just upload && just gen-ap-psk && just put-ap-psk
+# frozen image path: just fast-track
+# JSON recovery only: just put-credentials
 ```
 
 Serial port defaults to `/dev/ttyACM0`. Override with `AMPY_PORT`.
@@ -93,7 +95,7 @@ After the first boot, credentials and runtime state live in NVS, not as ordinary
 | Config | `config` | `cfg` |
 | Tracker | `tracker` | `trk` |
 
-`credentials.json` is copied into NVS and then removed from the filesystem.
+`credentials.json` is identity recovery: `device_id` / `device_token` copy into NVS, then the file is removed. House Wi‑Fi in that JSON is ignored; SSID/password live in NVS only (pairing or SoftAP).
 
 ```bash
 just pull-nvs-state
