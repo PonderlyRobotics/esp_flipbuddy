@@ -51,20 +51,20 @@ If a cube has been offline for a long time and no longer talks to the dashboard,
 
 ## SoftAP captive portal (HTTP, PIN, Wi‑Fi)
 
-When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑reset into a temporary SoftAP named **`FlipBuddy`** and serve a captive portal over **cleartext HTTP** at `http://10.20.30.40/`. That path is intentional local maintenance: status, Wi‑Fi profile edits, setup PIN change, LED self‑test, and device reset. It is **not** a hardened remote admin interface.
+When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑reset into a temporary **WPA2‑PSK** SoftAP named **`FlipBuddy`** and serve a captive portal over **HTTP** at `http://10.20.30.40/`. Join password is **`FB` + last 6 alphanumeric characters of `device_id`** (always 8 characters; independent of a custom portal PIN). That path is intentional local maintenance: status, Wi‑Fi profile edits, setup PIN change, LED self‑test, and device reset. It is **not** a hardened remote admin interface.
 
 ### Risks (honest)
 
 | Risk | Why it exists |
 |------|----------------|
-| **No TLS on SoftAP** | ESP SoftAP + MicroPython cannot host a meaningful HTTPS cert chain for a local AP. PIN, Wi‑Fi password, and form bodies travel in **cleartext on the SoftAP Wi‑Fi**. |
-| **Open SoftAP** | The AP uses open auth so a phone can join without a Wi‑Fi password. Anyone in radio range while the session is up can associate and hit the portal. |
-| **PIN over HTTP** | Unlocking settings (or setting a custom PIN) sends the setup PIN in HTTP form posts. A passive listener on that SoftAP can capture it for that session. |
+| **No TLS on SoftAP** | ESP SoftAP + MicroPython cannot host a meaningful HTTPS cert chain for a local AP. After you join, PIN, Wi‑Fi password, and form bodies travel in **cleartext HTTP on the encrypted SoftAP radio**. |
+| **Join password is derivable** | WPA2 PSK = **`FB` + last 6 alnum of `device_id`**. Anyone who knows your device id (credentials.json / account UI) can join. Serial also prints `SoftAP PSK=` for DIY/USB-console owners. |
+| **PIN over HTTP** | Unlocking settings (or setting a custom PIN) sends the setup PIN in HTTP form posts. A listener already on that SoftAP can capture it for that session. |
 | **Wi‑Fi password over HTTP** | After unlock, saving a home SSID/password also uses cleartext forms. Prefer doing this on a private desk, not a shared café radio environment. |
-| **Factory default PIN is derivable** | Default unlock PIN = **last 6 alphanumeric characters of `device_id`** (uppercased). Anyone who knows your device id (e.g. from credentials or account UI) can compute it until you set a custom PIN. |
+| **Factory default PIN is derivable** | Default unlock PIN = **last 6 alphanumeric characters of `device_id`** (uppercased). Same people who can compute the join PSK can compute the factory PIN until you set a custom PIN. |
 | **`/reset` is not PIN‑gated** | Physical possession of the cube (USB face + SoftAP) is treated as enough to reboot. That is a usability choice; it is not remote reset over the internet. `/reset` still works after PIN lockout. |
 | **Status without unlock** | Time, battery, face map, and local activity summaries are readable without the PIN so the portal stays useful when locked. |
-| **Multi‑client shared unlock** | Unlock is **device‑global for that SoftAP session**, not per phone. After one client unlocks, **any other client already on (or joining) the open SoftAP** can POST Wi‑Fi / PIN / LED test without knowing the PIN until idle timeout, lock, or SoftAP end. |
+| **Multi‑client shared unlock** | Unlock is **device‑global for that SoftAP session**, not per phone. After one client unlocks, **any other client already on (or joining) the SoftAP** can POST Wi‑Fi / PIN / LED test without knowing the PIN until idle timeout, lock, or SoftAP end. |
 
 `device_token` is **never** shown or written through SoftAP. Changing API credentials still requires USB/`credentials.json` (or equivalent maker path).
 
@@ -74,6 +74,7 @@ These do not make SoftAP “secure against a motivated local attacker,” but th
 
 | Measure | Detail |
 |---------|--------|
+| **WPA2-PSK on the radio** | SoftAP is `AUTH_WPA_WPA2_PSK`, not open. Casual neighbors cannot associate without the 8-character join password. Portal stays HTTP `:80` (phone TLS on SoftAP would OOM and break captive detect). |
 | **Physical access required** | SoftAP starts only when the cube is on the USB face (and AP mode is enabled), via soft‑reset into a short maintenance session—not from arbitrary remote wake. |
 | **Time‑bound session** | SoftAP portal runs about **5 minutes**, then SoftAP is stopped and the device deep‑sleeps. Unlock idle timeout is also about **5 minutes** of inactivity. |
 | **Session unlock, not always‑on admin** | Status is open; **Wi‑Fi write, PIN change, and LED test** need a successful PIN unlock for that SoftAP session. Prefer **only one phone** on `FlipBuddy` while unlocked; use **Lock settings** when finished. |
@@ -92,7 +93,7 @@ These do not make SoftAP “secure against a motivated local attacker,” but th
 
 End‑user SoftAP steps (join AP, fix Wi‑Fi, clock recovery) live in the [README SoftAP section](./README.md#softap-maintenance-mode).
 
-Hobby firmware cannot fully stop physical theft, an unlocked session, or a hostile radio environment next to an open SoftAP. Report real escalations (e.g. remote trigger of SoftAP, token leak, unauthenticated Wi‑Fi write) via the private channels above.
+Hobby firmware cannot fully stop physical theft, an unlocked session, or someone who already knows `device_id`. Report real escalations (e.g. remote trigger of SoftAP, token leak, unauthenticated Wi‑Fi write) via the private channels above.
 
 ## Firmware images
 

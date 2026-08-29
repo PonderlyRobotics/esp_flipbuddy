@@ -71,6 +71,67 @@ def test_tracking_log_html_table():
     assert "Duration" in html
 
 
+def test_show_softap_leds_lights_back_cutout_yellow():
+    class NP:
+        def __init__(self):
+            self.n = 6
+            self._data = [(0, 0, 0)] * 6
+
+        def __setitem__(self, i, v):
+            self._data[i] = v
+
+        def __getitem__(self, i):
+            return self._data[i]
+
+        def write(self):
+            pass
+
+    np = NP()
+    fsm = ap_mode.ApModeFSM(config=MagicMock(), tracker=MagicMock(), np_obj=np)
+    fsm.show_softap_leds()
+    from rgb import pinout
+
+    on = {pinout["top"]["led"], pinout["right"]["led"], pinout["front"]["led"]}
+    for i in range(6):
+        color = np[i]
+        if i in on:
+            assert color[0] > 0 and color[1] > 0 and color[2] == 0
+        else:
+            assert color == (0, 0, 0)
+
+
+def test_show_softap_leds_skipped_when_indicator_disabled():
+    import rgb
+
+    class NP:
+        def __init__(self):
+            self.n = 6
+            self._data = [(0, 0, 0)] * 6
+
+        def __setitem__(self, i, v):
+            self._data[i] = v
+
+        def __getitem__(self, i):
+            return self._data[i]
+
+        def write(self):
+            pass
+
+    np = NP()
+    vcc = MagicMock()
+    fsm = ap_mode.ApModeFSM(
+        config=MagicMock(), tracker=MagicMock(), np_obj=np, np_vcc=vcc
+    )
+    prev = rgb.ENABLE_SOFTAP_INDICATOR
+    try:
+        rgb.ENABLE_SOFTAP_INDICATOR = False
+        fsm.show_softap_leds()
+    finally:
+        rgb.ENABLE_SOFTAP_INDICATOR = prev
+    vcc.on.assert_not_called()
+    assert np._data == [(0, 0, 0)] * 6
+
+
 def test_tracking_log_empty():
     tracker = SimpleNamespace(running={"tracking_log": {}})
     for face in ("front", "back", "left", "right", "top", "bottom"):
@@ -104,6 +165,11 @@ def test_generate_html_empty_logs_renders_as_html_not_type_repr():
     assert "<class" not in page
     assert "100%" in page  # battery percent preserved
     assert "Content-Type" not in page  # body only
+    assert "WPA2" in page
+    assert "HTTP only" not in page
+    assert "open network" not in page
+    assert "FB" in page
+    assert "last 6" in page
 
 
 def test_tracking_log_skips_non_string_entries():

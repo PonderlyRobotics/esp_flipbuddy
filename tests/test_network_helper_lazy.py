@@ -41,3 +41,23 @@ def test_start_softap_success():
     )
     assert ap.active() is True
     assert ap.ifconfig()[0] == "10.20.30.40"
+
+
+def test_start_softap_sets_wpa_password_in_same_config_call():
+    network.WLAN.created.clear()
+    nh._sta_if = None
+    ap = nh.start_softap(
+        essid="FlipBuddy",
+        ip="10.20.30.40",
+        subnet="255.255.255.0",
+        authmode=network.AUTH_WPA_WPA2_PSK,
+        password="FB8B5778",
+        settle_ms=0,
+        retries=1,
+    )
+    assert any(
+        c.get("essid") == "FlipBuddy"
+        and c.get("authmode") == network.AUTH_WPA_WPA2_PSK
+        and c.get("password") == "FB8B5778"
+        for c in ap.config_calls
+    )

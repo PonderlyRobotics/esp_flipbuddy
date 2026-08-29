@@ -15,6 +15,7 @@ References:
 
 FlipBuddy SoftAP captive portal (USB face / AP mode):
 
+- WPA2-PSK join password: FB + last 6 alnum of device_id (HTTP on the AP)
 - Status: time, battery, face map, activity records
 - Unlock with PIN (factory: last 6 alnum of device_id, or custom NVS pin)
 - Unlocked: Wi-Fi profiles, change PIN, LED self-test, lock
@@ -29,6 +30,7 @@ import network
 import uasyncio as asyncio
 import utime as time
 from credentials import (
+    get_ap_psk,
     get_ap_unlock_pin,
     load_credentials,
     set_ap_unlock_pin,
@@ -37,6 +39,8 @@ from credentials import (
 )
 from models import BaseFSM, Transition
 from network_helper import start_softap
+import rgb
+from rgb import SOFTAP_LED_COLOR, set_cutout_triad_static
 from util import read_battery_voltage, rgb_self_test, suppress
 
 AP_SSID = "FlipBuddy"
@@ -258,14 +262,12 @@ class ApModeFSM(BaseFSM):
                 self.np_vcc.on()
                 time.sleep_ms(50)
             rgb_self_test(self.np_obj)
-            if self.np_vcc is not None:
-                self.np_vcc.off()
+            self.show_softap_leds()
             self._touch_unlock()
             return True, "LED test finished"
         except Exception as e:
             with suppress(Exception):
-                if self.np_vcc is not None:
-                    self.np_vcc.off()
+                self.show_softap_leds()
             return False, "LED test failed: %s" % e
         finally:
             self._led_test_busy = False
@@ -282,7 +284,8 @@ class ApModeFSM(BaseFSM):
                 essid=AP_SSID,
                 ip=AP_IP,
                 subnet=AP_SUBNET,
-                authmode=network.AUTH_OPEN,
+                authmode=network.AUTH_WPA_WPA2_PSK,
+                password=get_ap_psk(),
                 settle_ms=300,
                 retries=3,
             )
@@ -292,6 +295,17 @@ class ApModeFSM(BaseFSM):
         asyncio.create_task(server.wait_closed())
         asyncio.create_task(self.run_dns_server())
         print("Servers started mem_free=", gc.mem_free())
+        self.show_softap_leds()
+
+    def show_softap_leds(self):
+        """Solid SoftAP triad for the whole portal session, if enabled."""
+        if not rgb.ENABLE_SOFTAP_INDICATOR:
+            return
+        if self.np_vcc is not None:
+            with suppress(Exception):
+                self.np_vcc.on()
+        if self.np_obj is not None:
+            set_cutout_triad_static(self.np_obj, "back_cutout", SOFTAP_LED_COLOR)
 
     def shutdown(self):
         if self.ap is not None:
@@ -678,9 +692,10 @@ class ApModeFSM(BaseFSM):
                 '<section class="card">'
                 "<h2>Unlock settings</h2>"
                 "<p>Enter the setup PIN to change Wi-Fi, PIN, or run LED test.</p>"
-                '<p class="muted">Default PIN = last 6 letters/numbers of '
-                "<code>device_id</code> (flipbuddy.app / credentials.json), "
-                "unless you already changed it. PIN is not shown on the cube.</p>"
+                '<p class="muted">Join password = <code>FB</code> + last 6 of '
+                "<code>device_id</code>. Default PIN = those last 6 letters/numbers "
+                "(flipbuddy.app / credentials.json), unless you already changed it. "
+                "PIN is not shown on the cube.</p>"
                 '<form method="POST" action="/unlock" class="form">'
                 "<label>Setup PIN"
                 '<input name="pin" type="password" maxlength="16" autocomplete="one-time-code" '
@@ -751,7 +766,7 @@ h3{margin-top:1.4em}
   <div class="faces">__FACES__</div>
   <h2>Activity records</h2>
   __LOGS__
-  <p class="muted foot">SoftAP ~5 min · open network · HTTP only</p>
+  <p class="muted foot">SoftAP ~5 min · WPA2 · HTTP</p>
 </div>
 </body></html>"""
         return (

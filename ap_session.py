@@ -38,10 +38,14 @@ def _bringup_softap():
 
     gc.collect()
     print("ap_session: mem_free before active", gc.mem_free())
+    from credentials import get_ap_psk
+
+    psk = get_ap_psk()
     ap.active(True)
-    ap.config(essid=AP_SSID, authmode=network.AUTH_OPEN)
+    ap.config(essid=AP_SSID, authmode=network.AUTH_WPA_WPA2_PSK, password=psk)
     ap.ifconfig((AP_IP, AP_SUBNET, AP_IP, AP_IP))
     print("ap_session: SoftAP OK", ap.ifconfig(), "mem_free", gc.mem_free())
+    print("ap_session: SoftAP PSK=%s" % psk)
     return ap
 
 
@@ -56,7 +60,17 @@ async def _portal(ap):
 
     np_obj = neopixel.NeoPixel(Pin(8), 6)
     np_vcc = Pin(7, Pin.OUT)
-    np_vcc.off()
+    from rgb import (
+        ENABLE_SOFTAP_INDICATOR,
+        SOFTAP_LED_COLOR,
+        set_cutout_triad_static,
+    )
+
+    if ENABLE_SOFTAP_INDICATOR:
+        np_vcc.on()
+        set_cutout_triad_static(np_obj, "back_cutout", SOFTAP_LED_COLOR)
+    else:
+        np_vcc.off()
     adc_vin = ADC(Pin(9), atten=ADC.ATTN_11DB)
     try:
         adc_vin.width(ADC.WIDTH_12BIT)
@@ -76,7 +90,7 @@ async def _portal(ap):
     await fsm.run()
 
     print(
-        "ap_session: portal up %ds - join WiFi '%s' -> http://%s/"
+        "ap_session: portal up %ds - join WiFi '%s' (WPA2) -> http://%s/"
         % (AP_DURATION_S, AP_SSID, AP_IP)
     )
     for i in range(AP_DURATION_S):
