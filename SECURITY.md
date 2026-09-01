@@ -40,7 +40,8 @@ Everyday bugs, typos, and “please add this feature” belong in **public issue
 
 | Version | Support |
 |---------|---------|
-| **0.1.x** | Best effort |
+| **0.2.x** | Best effort (claim pairing + dual-OTA freeze) |
+| **0.1.x** (v0.1.0–v0.1.5) | Obsolete. Does not work with Production claim pairing or dual-OTA. USB-flash **0.2.0**. |
 | Older or untagged trees | No formal support |
 
 ## Credentials
@@ -97,7 +98,7 @@ Hobby firmware cannot fully stop physical theft, an unlocked session, or someone
 
 ## Firmware images
 
-Prefer Release assets that ship with SHA-256 checksums. Frozen images also contain MicroPython and other third-party code; see [docs/NOTICE](./NOTICE).
+Prefer Release assets that ship with SHA-256 checksums. GitHub Releases attach **USB** images only (`*-ota.bin` and the factory `.bin`). App-slot OTA packages are not public Release files. Frozen images also contain MicroPython and other third-party code; see [docs/NOTICE](./NOTICE). Supported freeze is **0.2.x**; **0.1.x** does not work with Production claim pairing or dual-OTA.
 
 ## Scope
 

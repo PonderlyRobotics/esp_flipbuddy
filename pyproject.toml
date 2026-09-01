@@ -6,7 +6,7 @@
 
 [project]
 name = "flipbuddy"
-version = "0.1.5"
+version = "0.2.0"
 description = "OpenSource Time Tracking IoT Sensor"
 readme = "README.md"
 

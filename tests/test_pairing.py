@@ -2,12 +2,157 @@
 
 import importlib.util
 import json
+import types
 from pathlib import Path
 
 import credentials
 import pairing
+from http import HttpAuthError, http_result_for_status, is_http_auth_error
 from pairing_portal import generate_pairing_html, parse_pair_form
 from rgb import IDENTIFY_GREEN, set_all_pixels
+
+
+def test_firmware_version_is_0_2_0():
+    assert pairing.FIRMWARE_VERSION == "0.2.0"
+
+
+def test_http_401_403_surface_as_auth_error():
+    err = http_result_for_status("401", "")
+    assert is_http_auth_error(err)
+    assert err.status == 401
+    assert not err
+    err403 = http_result_for_status(403, "nope")
+    assert is_http_auth_error(err403)
+    assert err403.status == 403
+    assert http_result_for_status("200", '{"ok":true}') == '{"ok":true}'
+    assert http_result_for_status("500", "x") is None
+    assert not is_http_auth_error(None)
+    assert isinstance(HttpAuthError(401), HttpAuthError)
+
+
+class _FakeConfig:
+    def __init__(self, identify=True):
+        self.running = {"settings": {"pairing_identify": identify}}
+        self.saved = False
+
+    def apply(self, running):
+        self.running = running
+
+    def save(self):
+        self.saved = True
+
+
+def test_recover_after_401_clears_pairing_identify_keeps_token():
+    credentials.store_ap_psk("23456789ABCDEF")
+    credentials._write_to_nvs(
+        {
+            "device_id": "devABCDEF123456",
+            "device_token": "tok",
+            "wifi": {},
+        }
+    )
+    cfg = _FakeConfig(identify=True)
+    assert pairing.pairing_identify_on(cfg) is True
+    assert pairing.recover_after_auth_reject(cfg) is True
+    assert pairing.pairing_identify_on(cfg) is False
+    assert cfg.running["settings"]["pairing_identify"] is False
+    assert cfg.saved is True
+    cred = credentials.load_credentials()
+    assert cred["device_id"] == "devABCDEF123456"
+    assert cred["device_token"] == "tok"
+    assert credentials.load_ap_psk() == "23456789ABCDEF"
+
+
+def test_recover_after_401_already_cleared_does_not_save():
+    cfg = _FakeConfig(identify=False)
+    assert pairing.recover_after_auth_reject(cfg) is True
+    assert cfg.saved is False
+
+
+def test_ota_enabled_false_skips():
+    trk = types.SimpleNamespace(
+        running={
+            "ota_address": "https://api.flipbuddy.app/mip/pkg",
+            "raw_config": {"settings": {"ota_enabled": True}},
+        }
+    )
+    cfg = types.SimpleNamespace(running={"settings": {"ota_enabled": False}})
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert skip == "ota_enabled is false"
+
+
+def test_ota_missing_address_skips():
+    trk = types.SimpleNamespace(
+        running={"raw_config": {"settings": {"ota_enabled": True}}}
+    )
+    cfg = types.SimpleNamespace(running={"settings": {"ota_enabled": True}})
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert skip == "no ota_address"
+    empty = types.SimpleNamespace(
+        running={
+            "ota_address": "",
+            "raw_config": {"settings": {"ota_enabled": True}},
+        }
+    )
+    addr, skip = pairing.ota_should_install(empty, cfg)
+    assert addr is None
+    assert skip == "no ota_address"
+
+
+def test_ota_rejects_non_allowlisted_address():
+    cfg = types.SimpleNamespace(running={"settings": {"ota_enabled": True}})
+    trk = types.SimpleNamespace(
+        running={"ota_address": "https://evil.example/mip/pkg"}
+    )
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert skip == "address not allowlisted"
+    assert pairing.ota_address_allowed("http://api.flipbuddy.app/pkg") is False
+    assert pairing.ota_address_allowed("https://api.flipbuddy.app/v2/api/sensor/ota/") is True
+
+
+def test_pairing_stack_not_frozen_when_sources_on_fs():
+    assert pairing.pairing_stack_frozen() is False
+
+
+def test_ota_skips_frozen_pairing_stack(monkeypatch):
+    cfg = types.SimpleNamespace(
+        running={
+            "settings": {
+                "ota_enabled": True,
+                "ota_address": "https://api.flipbuddy.app/v2/api/sensor/ota/",
+                "ota_kind": "overlay",
+            }
+        }
+    )
+    trk = types.SimpleNamespace(running={})
+    monkeypatch.setattr(pairing, "pairing_stack_frozen", lambda: True)
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert "frozen" in skip
+
+
+def test_ota_uses_settings_address():
+    cfg = types.SimpleNamespace(
+        running={
+            "settings": {
+                "ota_enabled": True,
+                "ota_address": "https://api.flipbuddy.app/v2/api/sensor/ota/",
+                "ota_version": "0.2.1",
+                "ota_kind": "overlay",
+            }
+        }
+    )
+    trk = types.SimpleNamespace(running={"ota_applied_version": ""})
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert skip is None
+    assert addr.endswith("/sensor/ota/")
+    trk.running["ota_applied_version"] = "0.2.1"
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert skip == "already applied"
 
 
 def test_normalize_pairing_code():
@@ -129,10 +274,19 @@ def test_generate_pairing_html_flash_and_selected_ssid():
 
 def test_parse_claim_response():
     parsed = pairing.parse_claim_response(
-        '{"device_id":"u1","device_token":"t1","api_url":"https://x/v1/api/"}'
+        '{"device_id":"u1","device_token":"t1","api_url":"https://api.flipbuddy.app/v1/api/"}'
     )
     assert parsed["device_id"] == "u1"
     assert parsed["device_token"] == "t1"
+    assert parsed["api_url"] == "https://api.flipbuddy.app/v1/api/"
+    evil = pairing.parse_claim_response(
+        '{"device_id":"u1","device_token":"t1","api_url":"http://evil.example/v1/api/"}'
+    )
+    assert evil["api_url"] == pairing.DEFAULT_API
+    other_https = pairing.parse_claim_response(
+        '{"device_id":"u1","device_token":"t1","api_url":"https://x/v1/api/"}'
+    )
+    assert other_https["api_url"] == pairing.DEFAULT_API
 
 
 def _load_gen_ap_psk():
@@ -153,11 +307,41 @@ def test_host_gen_ap_psk_is_8_alphabet_chars():
 def test_host_gen_ap_psk_quiet_banner_is_password_only():
     mod = _load_gen_ap_psk()
     text = mod.banner("A6XVQEQ8", quiet=True)
-    assert text == "SoftAP join password:\n  A6XVQEQ8"
+    assert "A6XV QEQ8" in text
+    assert "Spaces are only for reading." in text
     full = mod.banner("A6XVQEQ8", quiet=False)
     assert "Next: just put-ap-psk" in full
     assert "credentials.json" not in full
     assert "gitignored" not in full
+
+
+def _load_strip_credentials_wifi():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "strip_credentials_wifi.py"
+    spec = importlib.util.spec_from_file_location("strip_credentials_wifi", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_strip_credentials_wifi_drops_house_keys(tmp_path):
+    mod = _load_strip_credentials_wifi()
+    src = tmp_path / "credentials.json"
+    dst = tmp_path / "out.json"
+    src.write_text(
+        json.dumps(
+            {
+                "device_id": "devABCDEF123456",
+                "device_token": "tok",
+                "wifi": {"home": {"ssid": "MyNet", "password": "secret"}},
+                "ssid": "MyNet",
+                "password": "secret",
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert mod.main([str(src), str(dst)]) == 0
+    out = json.loads(dst.read_text(encoding="utf-8"))
+    assert out == {"device_id": "devABCDEF123456", "device_token": "tok"}
 
 
 def test_host_gen_ap_psk_does_not_write_credentials_json(tmp_path):
@@ -176,11 +360,24 @@ def test_host_ensure_ignores_plaintext_file(tmp_path, monkeypatch):
     mod = _load_gen_ap_psk()
     (tmp_path / "ap_psk.txt").write_text("23456789\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mod, "generate_ap_psk", lambda: "ABCDEFGH")
+    monkeypatch.setattr(mod, "generate_ap_psk", lambda length=16: "ABCDEFGH")
     assert mod.main(["--ensure", "--quiet"]) == 0
     assert json.loads((tmp_path / "ap_psk.json").read_text(encoding="utf-8")) == {
         "ap_psk": "ABCDEFGH"
     }
+
+
+def test_ota_header_is_app_rejects_bootloader_and_merged():
+    boot = bytes([0xE9, 0x03, 0x02, 0x2F]) + b"\x00" * 12
+    app = bytes([0xE9, 0x07, 0x02, 0x2F]) + b"\x00" * 12
+    assert pairing.ota_header_is_app(app) is True
+    assert pairing.ota_header_is_app(boot) is False
+    assert pairing.ota_header_is_app(b"\xff" * 16) is False
+    assert pairing.ota_header_is_app(b"") is False
+    assert pairing.ota_header_is_app(None) is False
+    assert pairing.OTA_APP_MAX == 1769472
+    assert 1817552 > pairing.OTA_APP_MAX
+    assert 1752016 < pairing.OTA_APP_MAX
 
 
 def test_host_ensure_reuses_existing_json(tmp_path, monkeypatch, capsys):
@@ -194,7 +391,7 @@ def test_host_ensure_reuses_existing_json(tmp_path, monkeypatch, capsys):
         "ap_psk": "23456789"
     }
     out = capsys.readouterr().out
-    assert "23456789" in out
+    assert "2345 6789" in out
 
 
 def test_set_all_pixels_green():

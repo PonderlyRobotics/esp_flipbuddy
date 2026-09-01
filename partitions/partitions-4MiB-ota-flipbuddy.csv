@@ -1,0 +1,10 @@
+# FlipBuddy OSS Super Mini (4 MB). Dual OTA. Do not use stock 1.5 MB slots.
+# ota_0/ota_1 = 1.75 MB (fits ~1.67 MB frozen app with ~80 KB margin).
+# vfs ~448 KB for main.py + ap_psk only.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0x1C0000,
+ota_1,    app,  ota_1,   0x1D0000, 0x1C0000,
+vfs,      data, fat,     0x390000, 0x70000,

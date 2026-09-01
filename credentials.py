@@ -17,7 +17,9 @@ LAST_AP_KEY = "lastap"
 AP_PSK_KEY = "appsk"
 # Same alphabet as FlipBuddy pairing codes (no 0/O/1/I/L).
 AP_PSK_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
+AP_PSK_MIN_LEN = 8
 AP_PSK_LEN = 8
+ALLOWED_API_HOSTS = ("api.flipbuddy.app", "localhost", "127.0.0.1")
 AP_PSK_FILE = "ap_psk.json"
 API_URL_FILE = "api_url.txt"
 DEFAULT_API_URL = "https://api.flipbuddy.app/v1/api/"
@@ -149,10 +151,12 @@ def forget_account(keep_wifi=True):
     data = load_credentials() or {}
     data.pop("device_id", None)
     data.pop("device_token", None)
+    data.pop("api_url", None)
+    data.pop("ap_unlock_pin", None)
     if not keep_wifi:
         data["wifi"] = {}
     _write_to_nvs(data)
-    print("Forget account: device_id/token cleared; ap_psk kept")
+    print("Forget account: device_id/token/api_url/pin cleared; ap_psk kept")
     return True
 
 
@@ -236,7 +240,7 @@ def _normalize_ap_psk(raw):
         if u in allowed:
             out.append(u)
     psk = "".join(out)
-    if len(psk) < AP_PSK_LEN:
+    if len(psk) < AP_PSK_MIN_LEN:
         return None
     if len(psk) > 63:
         psk = psk[:63]
@@ -312,19 +316,43 @@ def load_ap_psk():
             psk = store_ap_psk(file_raw)
             with suppress(OSError):
                 os.remove(AP_PSK_FILE)
-            print("SoftAP PSK=%s" % psk)
+            print("SoftAP PSK %s" % psk_log_hint(psk))
             return psk
         except ValueError:
             print("ap_psk.json is not a valid SoftAP password")
     return None
 
 
-def normalize_api_url(raw):
-    """Return trailing-slash API base or None."""
+def _api_host(url):
+    rest = str(url or "")
+    if rest.startswith("https://"):
+        rest = rest[8:]
+    elif rest.startswith("http://"):
+        rest = rest[7:]
+    else:
+        return ""
+    hostport = rest.split("/")[0]
+    return hostport.split(":")[0].lower()
+
+
+def psk_log_hint(psk):
+    s = str(psk or "")
+    if not s:
+        return "missing"
+    if len(s) < 2:
+        return "set"
+    return "set **%s" % s[-2:]
+
+
+def normalize_api_url(raw, require_allowlist=False):
+    """Return trailing-slash https API base or None."""
     url = str(raw or "").strip()
-    if "://" not in url:
+    if not url.startswith("https://"):
         return None
-    return url.rstrip("/") + "/"
+    url = url.rstrip("/") + "/"
+    if require_allowlist and _api_host(url) not in ALLOWED_API_HOSTS:
+        return None
+    return url
 
 
 def store_api_url(raw):

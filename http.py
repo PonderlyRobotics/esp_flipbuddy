@@ -5,6 +5,38 @@ from credentials import load_credentials, store_credentials
 from util import suppress
 
 
+class HttpAuthError:
+    """401/403 from the API. Falsy so existing `if response:` paths stay failed."""
+
+    def __init__(self, status):
+        self.status = int(status)
+
+    def __bool__(self):
+        return False
+
+    def __repr__(self):
+        return "HttpAuthError(%s)" % self.status
+
+
+def is_http_auth_error(value):
+    return isinstance(value, HttpAuthError)
+
+
+def http_result_for_status(code, body):
+    """Map HTTP status to body, HttpAuthError (401/403), or None."""
+    s = str(code or "")
+    if s in ("200", "201"):
+        return body
+    if s in ("401", "403"):
+        return HttpAuthError(int(s))
+    return None
+
+
+def _status_code_from_line(status_line):
+    parts = (status_line or "").split()
+    return parts[1] if len(parts) > 1 else ""
+
+
 async def async_http_post(url, data, headers=None, timeout=5):
     """Perform async HTTP POST request using asyncio streams."""
     print("Requesting URL:", url)
@@ -19,9 +51,12 @@ async def async_http_post(url, data, headers=None, timeout=5):
     if url.startswith("https://"):
         proto = "https"
         url = url[8:]
+    elif url.startswith("http://"):
+        print("Refusing cleartext HTTP API")
+        return None
     else:
-        proto = "http"
-        url = url[7:]
+        print("Refusing non-HTTPS API URL")
+        return None
 
     if "/" in url:
         host, path = url.split("/", 1)
@@ -141,11 +176,9 @@ async def async_http_post(url, data, headers=None, timeout=5):
         status_line = response[: response.find(b"\r\n")].decode()
         print("Status:", status_line)
 
-        parts = status_line.split()
-        code = parts[1] if len(parts) > 1 else ""
-        if code in ("200", "201"):
-            return response[header_end + 4 :].decode()
-        return None
+        code = _status_code_from_line(status_line)
+        body = response[header_end + 4 :].decode()
+        return http_result_for_status(code, body)
 
     except Exception as e:
         print("Async HTTP failed:", e)
@@ -170,6 +203,8 @@ async def async_rotate_device_token(url):
     }
 
     response = await async_http_post(url, None, headers)  # No body for rotate
+    if is_http_auth_error(response):
+        return response
     if response:
         data = json.loads(response)
         if "new_device_token" in data:
@@ -190,6 +225,9 @@ async def async_post_request(url, data, extra_header=None, timeout=5):
         headers.update(extra_header)
 
     response = await async_http_post(url, data, headers, timeout)
+    if is_http_auth_error(response):
+        print("Request failed (auth %s)" % response.status)
+        return response
     if response:
         print("Request successful!")
         print("Response:", response)
@@ -211,9 +249,12 @@ async def async_http_get(url, headers=None, timeout=8):
     if url.startswith("https://"):
         proto = "https"
         url = url[8:]
+    elif url.startswith("http://"):
+        print("Refusing cleartext HTTP API")
+        return None
     else:
-        proto = "http"
-        url = url[7:]
+        print("Refusing non-HTTPS API URL")
+        return None
 
     if "/" in url:
         host, path = url.split("/", 1)
@@ -282,13 +323,13 @@ async def async_http_get(url, headers=None, timeout=8):
 
         status_line = response[: response.find(b"\r\n")].decode()
         print("GET Status:", status_line)
-        if "200" in status_line:
-            return response[header_end + 4 :].decode("utf-8")
-        else:
-            body = response[header_end + 4 :].decode("utf-8")
+        code = _status_code_from_line(status_line)
+        body = response[header_end + 4 :].decode("utf-8")
+        result = http_result_for_status(code, body)
+        if code not in ("200", "201"):
             print(f"GET failed ({status_line}):")
             print(body)
-            return None
+        return result
 
     except Exception as e:
         print("Async HTTP GET failed:", e)
@@ -301,6 +342,8 @@ async def get_request(url, params=None, extra_header=None):
         q = "&".join(f"{k}={v}" for k, v in params.items())
         url += "?" + q if "?" not in url else "&" + q
     resp = await async_http_get(url, headers)
+    if is_http_auth_error(resp):
+        return resp
     if resp:
         try:
             return json.loads(resp)

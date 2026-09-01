@@ -1,5 +1,7 @@
 # FlipBuddy v0.1.5
 
+> **Obsolete for new cubes.** v0.1.5 (and earlier) frozen images do **not** work with flipbuddy.app claim pairing and dual-OTA as shipped in **[v0.2.0](./RELEASE_NOTES_v0.2.0.md)**. USB-flash `esp32_s3_flipbuddy_0.2.0-ota.bin`. These notes stay for the historical GitHub Release.
+
 Firmware **0.1.5** is the first Super Mini image on **MicroPython 1.28**. It adds last-AP Wi‑Fi reconnect, WPA2 SoftAP, USB-face yellow SoftAP LEDs, live face preview after pickup, and the physical cutout triad map.
 
 ## Highlights

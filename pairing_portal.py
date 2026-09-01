@@ -1,4 +1,4 @@
-"""Unclaimed pairing captive portal (OSS v0.1.5).
+"""Unclaimed pairing captive portal (OSS v0.2.0).
 
 SSID scan + hidden SSID + house password + pairing code (XXXX-XXXX).
 HTTP :80 on WPA2 SoftAP. No PIN.
@@ -199,7 +199,9 @@ class PairingPortal:
                 retries=3,
             )
         print("pairing SoftAP", ap_ssid(), self.ap.ifconfig())
-        print("SoftAP PSK=%s" % get_ap_psk())
+        from credentials import psk_log_hint
+
+        print("SoftAP PSK %s" % psk_log_hint(get_ap_psk()))
         self.refresh_scan()
         server = await asyncio.start_server(self._http, "0.0.0.0", 80)
         asyncio.create_task(server.wait_closed())
@@ -313,7 +315,9 @@ def _bringup():
         settle_ms=300,
         retries=3,
     )
-    print("pairing: SoftAP PSK=%s" % psk)
+    from credentials import psk_log_hint
+
+    print("pairing: SoftAP PSK %s" % psk_log_hint(psk))
     return ap
 
 
@@ -341,11 +345,12 @@ async def _finish_claim(result):
         return False
     store_credentials(parsed["device_id"], parsed["device_token"])
     if parsed.get("api_url"):
-        data = load_credentials() or {}
-        data["api_url"] = parsed["api_url"]
-        from credentials import _write_to_nvs
+        from credentials import store_api_url
 
-        _write_to_nvs(data)
+        try:
+            store_api_url(parsed["api_url"])
+        except ValueError:
+            print("pairing: ignored api_url")
     print("pairing: claimed", parsed["device_id"])
     return True
 

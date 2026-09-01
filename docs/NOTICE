@@ -11,10 +11,11 @@ Third-party components (not complete)
 1) MicroPython
 
    Prebuilt images named esp32_s3_flipbuddy_*.bin on GitHub Releases embed a
-   MicroPython runtime (v1.27 for the 0.1.0 image) and platform pieces from
-   the MicroPython ESP32 build. Those stay under their upstream licenses
-   (MicroPython is primarily MIT; see https://github.com/micropython/micropython
-   and ESP-IDF notices for the build).
+   MicroPython runtime (v1.28 for 0.1.5 and 0.2.0; v1.27 for 0.1.0–0.1.4) and
+   platform pieces from the MicroPython ESP32 build. Those stay under their
+   upstream licenses (MicroPython is primarily MIT; see
+   https://github.com/micropython/micropython and ESP-IDF notices for the build).
+   Dual-OTA 0.2.0 images (`*-ota.bin`, `*-ota-app.bin`) are the same license mix.
 
    FlipBuddy modules frozen into the image are MIT as in this repository.
    The combined .bin is not "MIT only."

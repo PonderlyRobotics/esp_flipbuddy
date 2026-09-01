@@ -1,5 +1,7 @@
 # FlipBuddy v0.1.2
 
+> **Obsolete for new cubes.** Use **[v0.2.0](./RELEASE_NOTES_v0.2.0.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
+
 Firmware **0.1.2** release: face orientation and NeoPixel pinout aligned to the physical enclosure.
 
 > **Superseded for cutout LEDs:** 0.1.2 had swapped SoftAP / cutout **triad** faces. New flashes should use **[0.1.3](./RELEASE_NOTES_v0.1.3.md)** (`esp32_s3_flipbuddy_0.1.3.bin`). Flat-face remap below is still correct and carried forward.

@@ -148,6 +148,8 @@ def test_ap_ssid_uses_unique_id_suffix():
 def test_forget_account_keeps_ap_psk_and_wifi():
     credentials.store_ap_psk("23456789")
     _seed()
+    credentials.store_api_url("https://evil.example/v1/api/")
+    credentials.set_ap_unlock_pin("mypin99")
     credentials.store_wifi_profile("home", "MyNet", "secret")
     credentials.forget_account(keep_wifi=True)
     assert credentials.load_ap_psk() == "23456789"
@@ -155,6 +157,8 @@ def test_forget_account_keeps_ap_psk_and_wifi():
     assert data is not None
     assert not data.get("device_id")
     assert not data.get("device_token")
+    assert not data.get("api_url")
+    assert not data.get("ap_unlock_pin")
     assert data["wifi"]["home"]["ssid"] == "MyNet"
 
 
@@ -180,6 +184,14 @@ def test_store_and_load_api_url():
     assert url == "https://example.invalid/v1/api/"
     assert credentials.load_api_url() == "https://example.invalid/v1/api/"
     assert "ap_psk" not in (credentials.load_credentials() or {})
+
+
+def test_store_api_url_rejects_http():
+    try:
+        credentials.store_api_url("http://evil.example/v1/api/")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
 
 
 def test_missing_ap_psk_repl_names_just_recipes():

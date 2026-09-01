@@ -13,7 +13,7 @@ labels: bug
 
 - Board:
 - Flash path: frozen Release `.bin` / stock MicroPython + all sources
-- Version / commit / Release tag:
+- Version / commit / Release tag: (v0.2.0 frozen / stock MicroPython / other)
 - OS + tools:
 
 ## Steps to reproduce

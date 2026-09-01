@@ -25,6 +25,14 @@ def generate_ap_psk(length: int = PSK_LEN) -> str:
     return "".join(secrets.choice(ALPHABET) for _ in range(length))
 
 
+def format_ap_psk_display(psk: str) -> str:
+    """XXXX XXXX for reading. Join Wi-Fi without the space."""
+    compact = "".join(ch.upper() for ch in str(psk or "") if ch.upper() in ALPHABET)
+    if len(compact) == 8:
+        return f"{compact[:4]} {compact[4:]}"
+    return compact or str(psk or "")
+
+
 def load_host_psk(root: Path | None = None) -> str | None:
     """Read host SoftAP password from ap_psk.json."""
     root = root or Path(".")
@@ -50,7 +58,8 @@ def persist_ap_psk(psk: str, root: Path | None = None) -> Path:
 
 
 def banner(psk: str, *, quiet: bool = False) -> str:
-    lines = ["SoftAP join password:", "  " + psk]
+    shown = format_ap_psk_display(psk)
+    lines = ["SoftAP join password:", "  " + shown, "  Spaces are only for reading."]
     if not quiet:
         lines.append("Next: just put-ap-psk")
     return "\n".join(lines)
@@ -69,10 +78,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="reuse existing ap_psk.json instead of generating",
     )
+    parser.add_argument(
+        "--length",
+        type=int,
+        default=PSK_LEN,
+        help="password length (default 8, min 8 for WPA2)",
+    )
     args = parser.parse_args(argv)
     psk = load_host_psk() if args.ensure else None
     if not psk:
-        psk = generate_ap_psk()
+        psk = generate_ap_psk(args.length)
     persist_ap_psk(psk)
     print(banner(psk, quiet=args.quiet))
     return 0

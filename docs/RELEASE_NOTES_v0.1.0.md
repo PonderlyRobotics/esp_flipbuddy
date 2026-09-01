@@ -1,5 +1,7 @@
 # FlipBuddy v0.1.0
 
+> **Obsolete for new cubes.** Use **[v0.2.0](./RELEASE_NOTES_v0.2.0.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
+
 This is the first public DIY release under Ponderly Robotics.
 
 You get a printed 8-face cube and MicroPython firmware for a stock ESP32-S3. Sessions show up in the free app at [flipbuddy.app](https://flipbuddy.app). I built it because I kept forgetting phone timers; I maintain it when I have free evenings.

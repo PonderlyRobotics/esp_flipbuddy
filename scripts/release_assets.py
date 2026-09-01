@@ -153,7 +153,7 @@ def main() -> int:
             tag = "v" + parts[-1]
         else:
             tag = "vX.Y.Z"
-    title = args.title.strip() or f"{tag} — ESP32-S3 frozen firmware"
+    title = args.title.strip() or f"{tag} - ESP32-S3 frozen firmware"
     remote = git_remote_https() or "https://github.com/<this-repo>"
 
     print()

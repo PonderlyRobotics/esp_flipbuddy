@@ -2,7 +2,30 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.2.0 (2026-09-01)
+
+Firmware **0.2.0** frozen Super Mini image (`pairing.FIRMWARE_VERSION`). **Breaking** vs every **v0.1.x** tag. Flash **`esp32_s3_flipbuddy_0.2.0-ota.bin`**. Tags **v0.1.0**–**v0.1.5** do not work with Production claim pairing or dual-OTA; they stay on GitHub as history only. See [RELEASE_NOTES_v0.2.0.md](./RELEASE_NOTES_v0.2.0.md).
+
+Breaking:
+
+- Pairing JSON is not the first setup step. `just fast-track` uploads `main.py` plus a host SoftAP password (`ap_psk`). Dashboard `credentials.json` is recovery only (`just put-credentials`).
+- Unclaimed SoftAP SSID is **`FlipBuddy-XXXX`** (last 4 of chip id), not always `FlipBuddy`.
+- Dual-OTA 4 MB table (`ota_0` / `ota_1`). v0.1.5 factory images have no `ota_1`; you cannot self-update 0.1.5 to 0.2.0.
+- Full USB `erase-flash` of the OTA USB image wipes NVS. Pair again with Add Device. Skip Forget after a reflash.
+
+Also:
+
+- Frozen pairing portal (`pairing.py` / `pairing_portal.py`) in the image; fast track only places `main.py` + `ap_psk.json`
+- Confirm-timeout 401/403 on GET config or sensor POST: clear NVS `pairing_identify` so USB-face SoftAP / PIN Forget works without erase-flash (token kept)
+- OTA: skip unless `settings.ota_enabled`; skip if `ota_address` is missing (do not claim success); HTTPS host allowlist only (`api.flipbuddy.app`, `raw.githubusercontent.com`); refuse merged USB / oversize / bootloader-header files; solid white LEDs during download; frozen pairing stack is not mip-updated
+- House Wi-Fi never copied from recovery JSON and never posted on claim
+- NVS stays 16 KB (about 45-70 closed sessions offline). OTA slot padding is unused flash, not a session store.
+
+Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.0-ota.bin` (preferred USB), `esp32_s3_flipbuddy_0.2.0.bin` (factory table). App-slot OTA files stay on flipbuddy.app; they are not GitHub assets. Prefer the FlipBuddy freeze over stock MicroPython.
+
 ## 0.1.5 (2026-08-29)
+
+**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.0**.
 
 Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050 + ADC.
 

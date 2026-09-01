@@ -22,3 +22,55 @@ UV_PROJECT_ENVIRONMENT = "{{ config_root }}/.venv"
 # Override on your machine if the serial device differs:
 #   export AMPY_PORT=/dev/ttyUSB0
 AMPY_PORT = "/dev/ttyACM0"
+
+# GitHub Release helpers (USB images only). Maintainer freeze/sync lives in
+# gitignored mise.local.toml (FLIPBUDDY_ESP_TREE). Default USB image: 0.2.0-ota.
+
+[tasks.release-sha]
+description = "SHA-256 USB frozen images for GitHub Release (no *-ota-app.bin)"
+dir = "{{ config_root }}"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+TAG="${2:-v0.2.0}"
+if [[ -n "${1:-}" ]]; then
+  bins=("$1")
+else
+  bins=(
+    "${FLIPBUDDY_RELEASE_BIN:-build/esp32_s3_flipbuddy_0.2.0-ota.bin}"
+    build/esp32_s3_flipbuddy_0.2.0.bin
+  )
+fi
+uniq=()
+for f in "${bins[@]}"; do
+  [[ -f "$f" ]] || { echo "error: firmware not found: $f"; exit 1; }
+  case "$f" in
+    *-ota-app.bin)
+      echo "error: $f is an app-slot package, not a GitHub USB image"
+      exit 1
+      ;;
+  esac
+  uniq+=("$f")
+done
+exec python3 scripts/release_assets.py "${uniq[@]}" --tag "$TAG" --notes-file docs/RELEASE_NOTES_${TAG}.md
+"""
+
+[tasks.release-tag]
+description = "Create annotated git tag (local only; no push)"
+dir = "{{ config_root }}"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+TAG="${1:-v0.2.0}"
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "error: tag already exists: $TAG"
+  echo "  git show $TAG"
+  exit 1
+fi
+git tag -a "$TAG" -m "FlipBuddy firmware ${TAG#v}
+
+BREAKING CHANGE: v0.1.x frozen images and JSON-first pairing do not work
+with Production claim pairing or dual-OTA. USB-flash esp32_s3_flipbuddy_${TAG#v}-ota.bin."
+echo "created $TAG at $(git rev-parse --short HEAD)"
+echo "  push:  git push origin HEAD && git push origin $TAG"
+"""

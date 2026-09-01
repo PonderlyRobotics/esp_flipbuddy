@@ -46,7 +46,9 @@ def _bringup_softap():
     ap.config(essid=ssid, authmode=network.AUTH_WPA_WPA2_PSK, password=psk)
     ap.ifconfig((AP_IP, AP_SUBNET, AP_IP, AP_IP))
     print("ap_session: SoftAP OK", ap.ifconfig(), "mem_free", gc.mem_free())
-    print("ap_session: SoftAP PSK=%s" % psk)
+    from credentials import psk_log_hint
+
+    print("ap_session: SoftAP PSK %s" % psk_log_hint(psk))
     return ap
 
 

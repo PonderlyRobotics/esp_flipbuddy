@@ -4,11 +4,12 @@
 #
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
-#   2. just flash-firmware esp32_s3_flipbuddy_0.1.5.bin
+#   2. just flash-firmware esp32_s3_flipbuddy_0.2.0-ota.bin
 #   3. just fast-track   # main.py + ap_psk, then hard reset (does NOT upload credentials.json)
 #   4. Join FlipBuddy-XXXX with the printed password.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
 # JSON recovery (advanced): just put-credentials
+# v0.1.x frozen images do not work with Production claim pairing / dual-OTA.
 #
 # Device recipes default to mpremote. Legacy ampy: just upload-ampy / put-credentials-ampy.
 #
@@ -41,7 +42,7 @@ wait_spin() {
   local pid=$! i=0 rc=0
   local sp='|/-\'
   while kill -0 "$pid" 2>/dev/null; do
-    printf '\r  waiting %s' "${sp:$((i % 4)):1}" >&2
+    printf '\r  Do not move or unplug the cube. Setting things up %s' "${sp:$((i % 4)):1}" >&2
     i=$((i + 1))
     sleep 0.1
   done
@@ -133,17 +134,7 @@ put-credentials:
     set -euo pipefail
     test -f credentials.json || { echo "credentials.json not found next to justfile"; exit 1; }
     tmp="$(mktemp)"
-    python3 -c '
-import json, sys
-src, dst = sys.argv[1], sys.argv[2]
-data = json.load(open(src, encoding="utf-8"))
-if not isinstance(data, dict):
-    sys.exit("credentials.json is not an object")
-data.pop("wifi", None)
-data.pop("ssid", None)
-data.pop("password", None)
-json.dump(data, open(dst, "w", encoding="utf-8"))
-' credentials.json "$tmp"
+    python3 scripts/strip_credentials_wifi.py credentials.json "$tmp"
     mpremote connect {{ usb_dev }} cp "$tmp" :credentials.json
     rm -f "$tmp"
     echo "credentials.json uploaded (recovery; house Wi-Fi stripped). Pairing SoftAP will not start."
@@ -154,17 +145,7 @@ put-credentials-ampy:
     set -euo pipefail
     test -f credentials.json || { echo "credentials.json not found next to justfile"; exit 1; }
     tmp="$(mktemp)"
-    python3 -c '
-import json, sys
-src, dst = sys.argv[1], sys.argv[2]
-data = json.load(open(src, encoding="utf-8"))
-if not isinstance(data, dict):
-    sys.exit("credentials.json is not an object")
-data.pop("wifi", None)
-data.pop("ssid", None)
-data.pop("password", None)
-json.dump(data, open(dst, "w", encoding="utf-8"))
-' credentials.json "$tmp"
+    python3 scripts/strip_credentials_wifi.py credentials.json "$tmp"
     ampy --port {{ usb_dev }} put "$tmp" credentials.json
     rm -f "$tmp"
     echo "credentials.json uploaded (ampy, recovery; house Wi-Fi stripped)."
@@ -244,20 +225,25 @@ pull-nvs-state out=".":
 
 # Full erase + flash a firmware .bin (download frozen images from GitHub Releases first)
 [group("Device")]
-flash-firmware firmware="esp32_s3_flipbuddy_0.1.5.bin":
-    # Examples:
-    #   just flash-firmware esp32_s3_flipbuddy_0.1.5.bin   # from GitHub Releases
-    #   just flash-firmware ESP32_GENERIC_S3-....bin       # stock MicroPython
-    #
-    # Frozen FlipBuddy images are on GitHub Releases (not committed). Verify .sha256 then flash.
-    # After the frozen image: main.py + ap_psk.json on the FS (just fast-track).
-    # JSON recovery: just put-credentials. Stock MP: https://micropython.org/download/ESP32_GENERIC_S3/
-    @test -f "{{ firmware }}" || (echo "Firmware file not found: {{ firmware }}" && echo "Download the Release asset first (see README / CONTRIBUTING)." && exit 1)
-    @echo "!!! This will ERASE the entire flash on {{ usb_dev }}"
-    @echo "!!! NVS (token, wifi, ap_psk) is wiped. After flash: just gen-ap-psk && just put-ap-psk"
-    @echo "→ Flashing {{ firmware }} ..."
+flash-firmware firmware="esp32_s3_flipbuddy_0.2.0-ota.bin":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # USB images only: *-ota.bin (preferred) or factory .bin. Looks in cwd, then build/.
+    # Do not write-flash 0 an app-slot OTA package.
+    fw="{{ firmware }}"
+    if [[ ! -f "$fw" && -f "build/$fw" ]]; then
+      fw="build/$fw"
+    fi
+    if [[ ! -f "$fw" ]]; then
+      echo "Firmware file not found: {{ firmware }} (also tried build/)"
+      echo "Download the Release asset first (see README / CONTRIBUTING)."
+      exit 1
+    fi
+    echo "!!! This will ERASE the entire flash on {{ usb_dev }}"
+    echo "!!! NVS (token, wifi, ap_psk) is wiped. After flash: just gen-ap-psk && just put-ap-psk"
+    echo "→ Flashing $fw ..."
     esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} erase-flash
-    esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} --baud 460800 write-flash 0 {{ firmware }}
+    esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} --baud 460800 write-flash 0 "$fw"
 
 # =============================================================================
 # ADVANCED
@@ -347,45 +333,75 @@ release-check:
     @echo ""
     @echo "✓ release-check passed. Review any warnings above before publishing."
 
-# Hash a frozen .bin for GitHub Releases (writes .sha256 + SHA256SUMS; does not upload)
-# Positional args only: just release-assets esp32_s3_flipbuddy_0.1.3.bin v0.1.3
+# Hash USB frozen images for GitHub Releases (writes .sha256 + SHA256SUMS; does not upload).
+# Default: v0.2.0 factory + dual-OTA USB bins under build/. Does not hash app-slot OTA files.
+#   just release-assets
+#   just release-assets build/esp32_s3_flipbuddy_0.2.0-ota.bin v0.2.0
 [group("Utils")]
-release-assets firmware tag="":
+release-assets firmware="" tag="v0.2.0":
     #!/usr/bin/env bash
     set -euo pipefail
-    if [[ ! -f "{{ firmware }}" ]]; then
-      echo "Firmware file not found: {{ firmware }}"
-      echo "Build the frozen image first, then run this from the directory that contains it."
-      exit 1
+    if [[ -n "{{ firmware }}" ]]; then
+      bins=("{{ firmware }}")
+    else
+      bins=(
+        build/esp32_s3_flipbuddy_0.2.0.bin
+        build/esp32_s3_flipbuddy_0.2.0-ota.bin
+      )
     fi
-    args=(scripts/release_assets.py "{{ firmware }}")
-    if [[ -n "{{ tag }}" ]]; then
-      args+=(--tag "{{ tag }}")
+    for f in "${bins[@]}"; do
+      if [[ ! -f "$f" ]]; then
+        echo "Firmware file not found: $f"
+        echo "Place the USB .bin under build/ (or pass a path). Do not attach *-ota-app.bin."
+        exit 1
+      fi
+      case "$f" in
+        *-ota-app.bin)
+          echo "error: $f is an app-slot package, not a GitHub Release USB image"
+          exit 1
+          ;;
+      esac
+    done
+    args=(scripts/release_assets.py "${bins[@]}" --tag "{{ tag }}")
+    tag="{{ tag }}"
+    ver="${tag#v}"
+    notes="docs/RELEASE_NOTES_${tag}.md"
+    [[ -f "$notes" ]] || notes="docs/RELEASE_NOTES_v${ver}.md"
+    if [[ -f "$notes" ]]; then
+      args+=(--notes-file "$notes")
     fi
     python3 "${args[@]}"
 
-# Create GitHub Release + upload .bin and checksums (requires: gh auth login)
-# Positional: just release-publish esp32_s3_flipbuddy_0.1.3.bin v0.1.3
+# Create GitHub Release + upload USB .bin files and checksums (requires: gh auth login).
+# USB images only (factory + *-ota.bin). App-slot OTA stays on flipbuddy.app.
+#   just release-publish
+#   just release-publish v0.2.0
 [group("Utils")]
-release-publish firmware tag:
+release-publish tag="v0.2.0":
     #!/usr/bin/env bash
     set -euo pipefail
-    command -v gh >/dev/null || { echo "gh CLI not found — install GitHub CLI and run: gh auth login"; exit 1; }
-    test -f "{{ firmware }}" || { echo "Firmware file not found: {{ firmware }}"; exit 1; }
+    command -v gh >/dev/null || { echo "gh CLI not found. Install GitHub CLI and run: gh auth login"; exit 1; }
+    tag="{{ tag }}"
+    ver="${tag#v}"
+    factory="build/esp32_s3_flipbuddy_${ver}.bin"
+    ota="build/esp32_s3_flipbuddy_${ver}-ota.bin"
+    notes="docs/RELEASE_NOTES_${tag}.md"
+    [[ -f "$notes" ]] || notes="docs/RELEASE_NOTES_v${ver}.md"
+    test -f "$factory" || { echo "Firmware file not found: $factory"; exit 1; }
+    test -f "$ota" || { echo "Firmware file not found: $ota"; exit 1; }
+    test -f "$notes" || { echo "missing $notes"; exit 1; }
     just release-check
-    just release-assets "{{ firmware }}" "{{ tag }}"
-    side="{{ firmware }}.sha256"
-    sums="$(dirname "{{ firmware }}")/SHA256SUMS"
-    title="{{ tag }} — ESP32-S3 frozen firmware"
-    notes="Frozen MicroPython image for ESP32-S3 Super Mini–class boards. Verify with the attached .sha256 or SHA256SUMS before flashing."
-    assets=("{{ firmware }}" "$side")
+    just release-assets "" "$tag"
+    title="${tag} - ESP32-S3 frozen firmware (claim pairing, dual-OTA)"
+    assets=("$factory" "${factory}.sha256" "$ota" "${ota}.sha256")
+    sums="$(dirname "$ota")/SHA256SUMS"
     [[ -f "$sums" ]] && assets+=("$sums")
-    echo "→ gh release create {{ tag }} ..."
-    gh release create "{{ tag }}" \
+    echo "→ gh release create ${tag} ..."
+    gh release create "$tag" \
       --title "$title" \
-      --notes "$notes" \
+      --notes-file "$notes" \
       "${assets[@]}"
-    echo "✓ Release {{ tag }} published. Update README download links if needed."
+    echo "Release ${tag} published. USB images only (no *-ota-app.bin)."
 
 # Install git pre-commit hooks for this repo (host only; see CONTRIBUTING.md)
 [group("Utils")]

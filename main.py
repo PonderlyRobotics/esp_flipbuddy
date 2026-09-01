@@ -59,9 +59,11 @@ _early_softap_gate()
 # E402 ignored for this file in pyproject.toml (gate before models/MPU/http).
 import gc
 from http import (
+    async_http_get,
     async_post_request,
     async_rotate_device_token,
     get_request,
+    is_http_auth_error,
 )
 
 import esp32
@@ -105,6 +107,10 @@ from util import (
     suppress,
     time_iso,
 )
+
+# Dual-OTA Super Mini app slot brake (0x1C0000 minus 64K). Merged USB images are larger.
+OTA_APP_MAX = 1769472
+OTA_HOLD_COLOR = "#FFFFFF"
 
 # 240Mhz Note: Going lower cause led flicker due to software based async execution
 freq(240000000)
@@ -169,10 +175,8 @@ CREDENTIALS_OK = bool(
 )
 if not CREDENTIALS_OK:
     print("=" * 48)
-    print("Unclaimed: no device_id / device_token in NVS.")
-    print("  Pair from the cube SoftAP (just gen-ap-psk / just put-ap-psk).")
-    print("  House Wi-Fi stays in NVS; it is never in credentials.json.")
-    print("  Recovery identity only: just put-credentials")
+    print("Unclaimed cube.")
+    print("  Pair from the cube Wi-Fi. Keep USB plugged in.")
     print("=" * 48)
     TOKEN = ""
     HEADERS = {}
@@ -194,31 +198,140 @@ else:
 rtc_mem = RTC()
 
 
-async def get_remote_config():
-    """Fetch remote configuration from the server."""
+def _recover_http_auth(config):
+    from pairing import recover_after_auth_reject
+
+    recover_after_auth_reject(config)
+
+
+async def _http_get_bytes(url, headers, timeout=30):
+    """Full HTTPS GET. Frozen http.py truncates at 2048 when Content-Length is missing."""
+    if not str(url or "").startswith("https://"):
+        return None, None
+    rest = url[8:]
+    if "/" in rest:
+        host, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        host, path = rest, "/"
+    port = 443
+    if ":" in host:
+        host, port_s = host.split(":", 1)
+        port = int(port_s)
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port, ssl=True, server_hostname=host),
+        timeout,
+    )
+    req = "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n" % (
+        path,
+        host,
+    )
+    if headers:
+        for k, v in headers.items():
+            req += "%s: %s\r\n" % (k, v)
+    req += "\r\n"
+    writer.write(req.encode())
+    await writer.drain()
+    status = ""
+    length = -1
+    chunked = False
+    while True:
+        line = await asyncio.wait_for(reader.readline(), timeout)
+        if not line or line == b"\r\n":
+            break
+        if not status:
+            status = line.decode()
+        low = line.lower()
+        if low.startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1].strip())
+        if b"chunked" in low and low.startswith(b"transfer-encoding:"):
+            chunked = True
+    parts = status.split()
+    code = int(parts[1]) if len(parts) > 1 else 0
+    print("GET Status:", status.strip())
+
+    async def _readexact(need):
+        buf = b""
+        while len(buf) < need:
+            part = await asyncio.wait_for(reader.read(need - len(buf)), timeout)
+            if not part:
+                break
+            buf += part
+            wdt_feed()
+        return buf
+
+    body = b""
+    if chunked:
+        while True:
+            size_line = await asyncio.wait_for(reader.readline(), timeout)
+            if not size_line:
+                break
+            size_s = size_line.strip().split(b";", 1)[0]
+            if not size_s:
+                continue
+            size = int(size_s, 16)
+            if size == 0:
+                await asyncio.wait_for(reader.readline(), timeout)
+                break
+            body += await _readexact(size)
+            await asyncio.wait_for(reader.readline(), timeout)
+            wdt_feed()
+    elif length > 0:
+        body = await _readexact(length)
+    else:
+        while True:
+            part = await asyncio.wait_for(reader.read(4096), timeout)
+            if not part:
+                break
+            body += part
+            wdt_feed()
+    writer.close()
+    await writer.wait_closed()
+    return code, body
+
+
+async def get_remote_config(config=None):
+    """Fetch remote configuration. Must be a dict; frozen GET truncates JSON."""
     try:
-        return await get_request(
-            API_BASE + f"sensor/data/{TOKEN}/", extra_header=HEADERS
+        code, raw = await _http_get_bytes(
+            API_BASE + "sensor/data/%s/" % TOKEN, HEADERS, timeout=30
         )
-    except Exception:
+        if code in (401, 403):
+            _recover_http_auth(config)
+            return False
+        if code != 200 or not raw:
+            return False
+        import ujson as json
+
+        obj = json.loads(raw)
+        if not isinstance(obj, dict) or "settings" not in obj:
+            print("remote config JSON incomplete", len(raw or b""))
+            return False
+        return obj
+    except Exception as e:
+        print("get_remote_config:", e)
         return False
 
 
-async def push_tracking_log_to_remote(data, timeout=5):
+async def push_tracking_log_to_remote(data, timeout=5, config=None):
     """Push tracking log data to the remote server asynchronously and return success status."""
     dprint("API_BASE:", API_BASE)
     try:
         # Rotate may issue a new token (saved to NVS). Also refresh in-memory
         # HEADERS so this same wake's POST does not still send the old token.
         new_token = await async_rotate_device_token(API_BASE + "sensor/token/rotate/")
+        if is_http_auth_error(new_token):
+            _recover_http_auth(config)
+            return False
         if new_token:
             HEADERS["Device-Token"] = new_token
-        return (
-            await async_post_request(
-                API_BASE + "sensor/data/", data, extra_header=HEADERS, timeout=timeout
-            )
-            is not None
+        posted = await async_post_request(
+            API_BASE + "sensor/data/", data, extra_header=HEADERS, timeout=timeout
         )
+        if is_http_auth_error(posted):
+            _recover_http_auth(config)
+            return False
+        return posted is not None
     except Exception:
         return False
 
@@ -454,28 +567,324 @@ async def prepare_for_deep_sleep(
     deepsleep(sleep_ms)
 
 
-async def ota_weekly_check(tracker_obj):
-    """update/run OTA weekly on"""
-    now = time.time()
-    last = tracker_obj.running.get("last_ota_check", 0)
-    if now - last < tracker_obj.running.get("ota_frequency", DEFAULT_OTA) * 24 * 3600:
+def _ota_settings(remote, config):
+    """Prefer the live GET body. Frozen models.py drops ota_address."""
+    blob = {}
+    try:
+        if config is not None:
+            blob.update(((config.running or {}).get("settings") or {}))
+    except Exception:
+        pass
+    try:
+        if isinstance(remote, dict):
+            blob.update((remote.get("settings") or {}))
+    except Exception:
+        pass
+    return blob
+
+
+def _ota_addr_ok(addr):
+    if not str(addr or "").startswith("https://"):
         return False
-    dprint("Weekly OTA window - checking for firmware update...")
+    host = addr[8:].split("/")[0].split(":")[0].lower()
+    return host == "api.flipbuddy.app"
+
+
+def ota_header_is_app(head):
+    """App image (not bootloader / merged USB). Frozen pairing.py may lack this helper."""
+    try:
+        from pairing import ota_header_is_app as _chk
+
+        return _chk(head)
+    except (ImportError, AttributeError):
+        if not head or len(head) < 2:
+            return False
+        return head[0] == 0xE9 and head[1] >= 5
+
+
+async def _ota_hold_leds(tracker_obj):
+    """Solid all LEDs during OTA. Blink tasks steal CPU from the TLS download."""
+    pix = getattr(tracker_obj, "np_obj", None) or globals().get("np_obj")
+    try:
+        faces = (tracker_obj.running or {}).get("faces") or []
+    except Exception:
+        faces = []
+    for face in faces:
+        led = getattr(face, "led", None)
+        if not led:
+            continue
+        led._stop = True
+        task = getattr(led, "task", None)
+        if task:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            led.task = None
+    set_all_pixels(pix, OTA_HOLD_COLOR)
+    await asyncio.sleep_ms(0)
+    set_all_pixels(pix, OTA_HOLD_COLOR)
+
+
+def _ota_target_partition():
+    """Next OTA app slot, or (None, 0, '') on factory-only images."""
+    try:
+        import esp32
+
+        running = esp32.Partition(esp32.Partition.RUNNING)
+        nxt = running.get_next_update()
+        _typ, _sub, _addr, size, label, _enc = nxt.info()
+        if label in ("ota_0", "ota_1") and size > 65536:
+            return nxt, size, label
+    except Exception as e:
+        print("OTA no update slot:", e)
+    return None, 0, ""
+
+
+async def _ota_stream_sha256(url, headers, timeout=120, part=None, part_size=0):
+    """HTTPS GET body to sha256. If part is set, write 4K blocks into that OTA slot."""
+    import uhashlib
+
+    if not url.startswith("https://"):
+        print("OTA refuse non-https download")
+        return None
+    rest = url[8:]
+    if "/" in rest:
+        host, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        host, path = rest, "/"
+    port = 443
+    if ":" in host:
+        host, port_s = host.split(":", 1)
+        port = int(port_s)
+    print("OTA GET", host, path)
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port, ssl=True, server_hostname=host),
+        timeout,
+    )
+    req = "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n" % (
+        path,
+        host,
+    )
+    if headers:
+        for k, v in headers.items():
+            req += "%s: %s\r\n" % (k, v)
+    req += "\r\n"
+    writer.write(req.encode())
+    await writer.drain()
+    status = ""
+    length = -1
+    chunked = False
+    while True:
+        line = await asyncio.wait_for(reader.readline(), timeout)
+        if not line or line == b"\r\n":
+            break
+        if not status:
+            status = line.decode()
+        low = line.lower()
+        if low.startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1].strip())
+        if b"chunked" in low and low.startswith(b"transfer-encoding:"):
+            chunked = True
+    print("OTA download status:", status.strip(), "len", length, "chunked", chunked)
+    if " 200 " not in (" " + status):
+        writer.close()
+        await writer.wait_closed()
+        return None
+    if length > OTA_APP_MAX:
+        print(
+            "OTA refuse: %s bytes > app max %s (merged USB image?). Need *-ota-app.bin"
+            % (length, OTA_APP_MAX)
+        )
+        writer.close()
+        await writer.wait_closed()
+        return None
+    digest = uhashlib.sha256()
+    n = 0
+    blk = 0
+    acc = b""
+    BS = 4096
+    header_ok = None
+
+    def _flush(buf, last=False):
+        nonlocal blk
+        if part is None or not buf or header_ok is False:
+            return
+        if last and len(buf) < BS:
+            buf = buf + (b"\xff" * (BS - len(buf)))
+        part.writeblocks(blk, buf)
+        blk += 1
+
+    def _ingest(data):
+        nonlocal acc, n, header_ok
+        if n < 0 or not data:
+            return
+        digest.update(data)
+        n += len(data)
+        acc += data
+        if header_ok is None and len(acc) >= 16:
+            header_ok = ota_header_is_app(acc)
+            if not header_ok:
+                print(
+                    "OTA refuse: not an app image. Need *-ota-app.bin, not merged USB."
+                )
+                n = -1
+                acc = b""
+                return
+        while n >= 0 and len(acc) >= BS:
+            if part_size and (blk + 1) * BS > part_size:
+                print("OTA image larger than slot")
+                n = -1
+                acc = b""
+                return
+            _flush(acc[:BS])
+            acc = acc[BS:]
+
+    async def _readexact(need):
+        buf = b""
+        while len(buf) < need:
+            part = await asyncio.wait_for(reader.read(need - len(buf)), timeout)
+            if not part:
+                break
+            buf += part
+            wdt_feed()
+        return buf
+
+    if chunked:
+        while True:
+            size_line = await asyncio.wait_for(reader.readline(), timeout)
+            if not size_line:
+                break
+            size_s = size_line.strip().split(b";", 1)[0]
+            if not size_s:
+                continue
+            size = int(size_s, 16)
+            if size == 0:
+                await asyncio.wait_for(reader.readline(), timeout)
+                break
+            data = await _readexact(size)
+            _ingest(data)
+            if n < 0:
+                break
+            await asyncio.wait_for(reader.readline(), timeout)
+            wdt_feed()
+    elif length > 0:
+        remain = length
+        while remain > 0 and n >= 0:
+            piece = await asyncio.wait_for(reader.read(min(4096, remain)), timeout)
+            if not piece:
+                break
+            remain -= len(piece)
+            _ingest(piece)
+            wdt_feed()
+    else:
+        while n >= 0:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout)
+            if not chunk:
+                break
+            _ingest(chunk)
+            wdt_feed()
+    if n > 0 and acc:
+        if part_size and (blk + 1) * BS > part_size:
+            print("OTA image larger than slot")
+            n = -1
+        else:
+            _flush(acc, last=True)
+    writer.close()
+    await writer.wait_closed()
+    hx = ""
+    try:
+        hx = "".join("%02x" % b for b in digest.digest())
+    except Exception:
+        hx = ""
+    print("OTA hashed", n, "bytes", hx[:16])
+    if n < 0:
+        return None
+    if length > 0 and n != length:
+        print("OTA length mismatch want", length, "got", n)
+        return None
+    return n, hx
+
+
+async def ota_weekly_check(tracker_obj, config=None, remote=None):
+    """main.py-only OTA. Frozen pairing/models are not used (fast-track FS is main.py)."""
+    settings = _ota_settings(remote, config)
+    if not settings.get("ota_enabled"):
+        print("OTA skipped: ota_enabled is false")
+        return False
+    addr = str(settings.get("ota_address") or "").strip()
+    if not _ota_addr_ok(addr):
+        print("OTA skipped: no ota_address")
+        return False
+    ver = str(settings.get("ota_version") or "")
+    try:
+        applied = str((tracker_obj.running or {}).get("ota_applied_version") or "")
+    except Exception:
+        applied = ""
+    if ver and applied == ver:
+        print("OTA skipped: already applied")
+        return False
+    print("OTA fetching", addr)
     try:
         scheduler_wd.deinit()
         scheduler_wd.init(period=60000, mode=Timer.PERIODIC, callback=wdt_chk)
-        mip.install(tracker_obj.running["ota_address"])
-        dprint("OTA successful - rebooting in 1 second...")
-        tracker_obj.running["last_ota_check"] = now
-        tracker_obj.apply(tracker_obj.running)
-        tracker_obj.save()
-        await asyncio.sleep(1)
-        reset()
+        manifest_body = await async_http_get(addr, headers=HEADERS)
+        if not manifest_body:
+            print("OTA manifest failed")
+            return False
+        import ujson as json
+
+        manifest = json.loads(manifest_body)
+        kind = str(manifest.get("kind") or settings.get("ota_kind") or "")
+        version = str(manifest.get("version") or ver)
+        expect_sha = str(manifest.get("sha256") or "")
+        print("OTA manifest kind=%s version=%s" % (kind, version))
+        if kind == "bin":
+            await _ota_hold_leds(tracker_obj)
+            sep = "&" if "?" in addr else "?"
+            dl = addr + sep + "download=1"
+            slot, psz, lab = _ota_target_partition()
+            got = await _ota_stream_sha256(
+                dl, HEADERS, timeout=180, part=slot, part_size=psz
+            )
+            if not got:
+                print("OTA bin download failed")
+                return False
+            n, hx = got
+            if expect_sha and hx and hx != expect_sha:
+                print("OTA sha256 mismatch want", expect_sha[:16], "got", hx[:16])
+                return False
+            if slot is None:
+                print(
+                    "OTA bin ok (%s bytes). This image has no ota_1 slot; USB esptool to apply."
+                    % n
+                )
+            else:
+                print("OTA wrote", n, "bytes to", lab)
+                try:
+                    slot.set_boot()
+                except Exception as e:
+                    print("OTA set_boot failed:", e)
+                    print("OTA need *-ota-app.bin (app slot), not merged USB *-ota.bin")
+                    return False
+                print("OTA set_boot", lab, "- reboot")
+                tracker_obj.running["ota_applied_version"] = version
+                tracker_obj.running["last_ota_check"] = time.time()
+                tracker_obj.apply(tracker_obj.running)
+                tracker_obj.save()
+                await asyncio.sleep(1)
+                reset()
+                return True
+            tracker_obj.running["ota_applied_version"] = version
+            tracker_obj.running["last_ota_check"] = time.time()
+            tracker_obj.apply(tracker_obj.running)
+            tracker_obj.save()
+            return True
+        print("OTA kind %s not applied on frozen main.py-only image" % kind)
+        return False
     except Exception as e:
-        dprint("OTA check failed or no new version:", e)
-        tracker_obj.running["last_ota_check"] = now
-        tracker_obj.apply(tracker_obj.running)
-        tracker_obj.save()
+        print("OTA check failed:", e)
         return False
 
 
@@ -646,7 +1055,10 @@ class BootFSM(BaseFSM):
     async def fetch_config(self):
         dprint("Fetching remote config...")
         wdt_feed()
-        self.remote_config = await get_remote_config()
+        self.remote_config = await get_remote_config(self.config)
+        if not isinstance(self.remote_config, dict):
+            self.remote_config = None
+            return
         if self.remote_config:
             # Only apply + save if the meaningful settings actually changed.
             # This avoids unnecessary NVS commits (and was the original purpose of hash_digest).
@@ -656,6 +1068,7 @@ class BootFSM(BaseFSM):
             if new_hash != old_hash:
                 self.config.apply(self.config.running)
                 self.config.save()
+            await ota_weekly_check(self.tracker, self.config, self.remote_config)
 
     async def calibrate(self):
         dprint("Applying calibration...")
@@ -1191,7 +1604,7 @@ class UploadFSM(BaseFSM):
             )
             batt_reading.update(self.config.running["device"])
             wdt_feed()
-            remote_config = await get_remote_config()
+            remote_config = await get_remote_config(self.config)
             if remote_config:
                 # Guard: only persist if settings hash actually changed (saves NVS writes).
                 old_hash = self.config.running.get("hash_digest", "")
@@ -1209,7 +1622,7 @@ class UploadFSM(BaseFSM):
                     }
                 }
             )
-            _ = await ota_weekly_check(self.tracker)
+            _ = await ota_weekly_check(self.tracker, self.config, remote_config)
 
             self.tracker.running.update(
                 {
@@ -1235,7 +1648,10 @@ class UploadFSM(BaseFSM):
             dprint(data_to_remote)
             try:
                 success = await asyncio.wait_for_ms(
-                    push_tracking_log_to_remote(data_to_remote, timeout=4), 5000
+                    push_tracking_log_to_remote(
+                        data_to_remote, timeout=4, config=self.config
+                    ),
+                    5000,
                 )
                 if success:
                     dprint("-------------cleaning....")

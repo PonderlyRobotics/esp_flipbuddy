@@ -219,6 +219,9 @@ class Config(FileSystem):
                         "pairing_identify": bool(
                             config["settings"].get("pairing_identify", False)
                         ),
+                        "ota_address": config["settings"].get("ota_address") or "",
+                        "ota_version": config["settings"].get("ota_version") or "",
+                        "ota_kind": config["settings"].get("ota_kind") or "",
                     }
                 )
 

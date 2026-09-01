@@ -1,5 +1,7 @@
 # FlipBuddy v0.1.3
 
+> **Obsolete for new cubes.** Use **[v0.2.0](./RELEASE_NOTES_v0.2.0.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
+
 Firmware **0.1.3** release: cutout triad LED fix on top of the 0.1.2 face pinout remap.
 
 If you already flashed **0.1.2**, reflash this image. Flat-face tracking was fine on 0.1.2; **USB / front cutout** triad patterns lit the wrong three cells.
