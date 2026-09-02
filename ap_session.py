@@ -59,10 +59,11 @@ async def _portal(ap):
 
     import neopixel
     from ap_mode import ApModeFSM
+    from hw_config import NP_DATA_PIN, NP_VCC_PIN, NUM_LEDS, VIN_PIN
     from models import Config, Tracker
 
-    np_obj = neopixel.NeoPixel(Pin(8), 6)
-    np_vcc = Pin(7, Pin.OUT)
+    np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
+    np_vcc = Pin(NP_VCC_PIN, Pin.OUT)
     from rgb import (
         ENABLE_SOFTAP_INDICATOR,
         SOFTAP_LED_COLOR,
@@ -74,7 +75,7 @@ async def _portal(ap):
         set_cutout_triad_static(np_obj, "back_cutout", SOFTAP_LED_COLOR)
     else:
         np_vcc.off()
-    adc_vin = ADC(Pin(9), atten=ADC.ATTN_11DB)
+    adc_vin = ADC(Pin(VIN_PIN), atten=ADC.ATTN_11DB)
     try:
         adc_vin.width(ADC.WIDTH_12BIT)
     except Exception:

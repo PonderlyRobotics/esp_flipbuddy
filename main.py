@@ -1759,8 +1759,10 @@ if __name__ == "__main__":
         if load_ap_psk() is None:
             print_missing_ap_psk_repl()
         else:
+            from hw_config import configure_board_hw
             import pairing_portal
 
+            configure_board_hw()
             pairing_portal.run()
     else:
         scheduler_wd = Timer(TIMER_NUM)

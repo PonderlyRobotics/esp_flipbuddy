@@ -165,8 +165,9 @@ def _led_hw():
     """NeoPixel + VCC for unclaimed portal. Same pins as USB-face SoftAP."""
     from machine import Pin
     import neopixel
+    from hw_config import NP_DATA_PIN, NP_VCC_PIN, NUM_LEDS
 
-    return neopixel.NeoPixel(Pin(8), 6), Pin(7, Pin.OUT)
+    return neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS), Pin(NP_VCC_PIN, Pin.OUT)
 
 
 class PairingPortal:

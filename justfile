@@ -26,8 +26,8 @@ esp_chip := "s3"                             # esptool --chip esp32{{ esp_chip }
 esp_flash_size := "4MB"                      # document your module flash; shown by `just env`
 
 # Firmware modules for the ESP only (not host tools: test_fsm.py, clean_frozen.py, scripts/)
-device_py := "main.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
-# AST-stripped modules written by `just clean-frozen` (no main.py — kept full-size / editable)
+device_py := "main.py hw_config.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
+# AST-stripped modules written by `just clean-frozen` (no main.py / hw_config.py — LittleFS overlay)
 cleaned_dir := "/tmp/flipbuddy_cleaned"
 cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py pairing.py pairing_portal.py"
 
@@ -171,7 +171,7 @@ put-api-url api_url:
     echo "api $url"
 
 # Fast track FS deploy after flashing the frozen Release .bin.
-# main.py + SoftAP join password. Does **not** upload credentials.json.
+# main.py + hw_config.py + SoftAP join password. Does **not** upload credentials.json.
 # Optional https API base: just fast-track https://host/v1/api/
 [group("Device")]
 fast-track api_url=env("FLIPBUDDY_API_URL", ""):
@@ -180,7 +180,7 @@ fast-track api_url=env("FLIPBUDDY_API_URL", ""):
     {{ wait_spin }}
     port="{{ usb_dev }}"
     echo "→ fast-track $port"
-    wait_spin mpremote connect "$port" cp main.py :
+    wait_spin mpremote connect "$port" cp main.py hw_config.py :
     python3 scripts/gen_ap_psk.py --ensure --quiet
     wait_spin mpremote connect "$port" cp ap_psk.json :
     if [[ -n "{{ api_url }}" ]]; then
@@ -284,6 +284,8 @@ upload-clean:
     done
     echo "   + main.py (repo source, not stripped)"
     mpremote connect {{ usb_dev }} cp main.py :
+    echo "   + hw_config.py (repo source, not stripped)"
+    mpremote connect {{ usb_dev }} cp hw_config.py :
     echo "Upload complete. Reset the ESP32 to run the new code."
 
 # =============================================================================
