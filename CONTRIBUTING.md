@@ -184,8 +184,8 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 | SoftAP session (clean heap) | `ap_session.py` |
 | SoftAP captive portal | `ap_mode.py` (PIN unlock, Wi-Fi UI, LED test) |
 | Faces, tracker, config | `models.py` |
-| IMU / face math | `mpu6050.py` (leave the DMP blob and fmt guards alone) |
-| LEDs | `rgb.py` |
+| IMU / face math | `mpu6050.py` (leave the DMP blob and fmt guards alone). Super Mini face names also live in `settings.py` (`LED_PINOUT`, `overlay_face_from_tilt`) so a frozen image can take the overlay without a rebuild. |
+| LEDs | `rgb.py` (pixel helpers). Face index map is `LED_PINOUT` in `settings.py`. |
 | HTTP / token rotate | `http.py` |
 | Wi-Fi STA / SoftAP helpers | `network_helper.py` |
 | Credentials / NVS / SoftAP PIN | `credentials.py` |
@@ -195,9 +195,9 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 
 SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes.
 
-Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. USB face (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py`); for DIY full sources use `just diy` / `just upload`.
+Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. SoftAP cutout (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). USB-C port (`front_cutout`) is the stop face. For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py`); for DIY full sources use `just diy` / `just upload`.
 
-Pins: search `settings.py` for `NP_DATA_PIN` and the neighboring constants.
+Pins: search `settings.py` for `NP_DATA_PIN`, `LED_PINOUT`, and the neighboring constants.
 
 ## Custom frozen builds
 

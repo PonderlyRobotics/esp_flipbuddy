@@ -291,11 +291,22 @@ def _read_ap_psk_file():
 
 
 def load_ap_psk():
-    """Return NVS ap_psk, migrating from ap_psk.json once.
+    """Return SoftAP PSK. Host `ap_psk.json` overwrites NVS when present.
 
     Does not generate a password. OSS boot must halt if this is None and the
     cube is unclaimed (see missing_ap_psk_repl_lines).
     """
+    file_raw = _read_ap_psk_file()
+    if file_raw:
+        try:
+            psk = store_ap_psk(file_raw)
+            with suppress(OSError):
+                os.remove(AP_PSK_FILE)
+            print("SoftAP PSK %s" % psk_log_hint(psk))
+            return psk
+        except ValueError:
+            print("ap_psk.json is not a valid SoftAP password")
+
     nvs = _get_nvs()
     buffer = bytearray(64)
     try:
@@ -308,17 +319,6 @@ def load_ap_psk():
         pass
     except ValueError:
         pass
-
-    file_raw = _read_ap_psk_file()
-    if file_raw:
-        try:
-            psk = store_ap_psk(file_raw)
-            with suppress(OSError):
-                os.remove(AP_PSK_FILE)
-            print("SoftAP PSK %s" % psk_log_hint(psk))
-            return psk
-        except ValueError:
-            print("ap_psk.json is not a valid SoftAP password")
     return None
 
 

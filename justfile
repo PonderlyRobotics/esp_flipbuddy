@@ -109,12 +109,15 @@ put-main:
 gen-ap-psk:
     python3 scripts/gen_ap_psk.py
 
-# Copy ap_psk.json onto the cube (migrates to NVS on boot). Run after gen-ap-psk.
+# Copy ap_psk.json onto the cube and store it in NVS. Run after gen-ap-psk.
 [group("Device")]
 put-ap-psk:
-    @test -f ap_psk.json || (echo "ap_psk.json not found. Run: just gen-ap-psk" && exit 1)
-    @mpremote connect {{ usb_dev }} cp ap_psk.json : >/dev/null
-    @echo "uploaded ap_psk.json"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f ap_psk.json || { echo "ap_psk.json not found. Run: just gen-ap-psk"; exit 1; }
+    mpremote connect {{ usb_dev }} cp ap_psk.json : >/dev/null
+    mpremote connect {{ usb_dev }} exec "from credentials import store_ap_psk; import ujson; store_ap_psk(ujson.loads(open('ap_psk.json').read())['ap_psk'])" >/dev/null
+    echo "uploaded ap_psk.json"
 
 # Reflash / unpair: BOOT + RST, then erase-flash.
 [group("Device")]
@@ -172,7 +175,7 @@ put-api-url api_url:
 
 # Fast track FS deploy after flashing the frozen Release .bin.
 # main.py + settings.py + SoftAP join password. Does **not** upload credentials.json.
-# Optional https API base: just fast-track https://host/v1/api/
+# Optional https API base: just fast-track https://api.flipbuddy.app/v1/api/
 [group("Device")]
 fast-track api_url=env("FLIPBUDDY_API_URL", ""):
     #!/usr/bin/env bash
@@ -182,7 +185,7 @@ fast-track api_url=env("FLIPBUDDY_API_URL", ""):
     echo "→ fast-track $port"
     wait_spin mpremote connect "$port" cp main.py settings.py :
     python3 scripts/gen_ap_psk.py --ensure --quiet
-    wait_spin mpremote connect "$port" cp ap_psk.json :
+    just put-ap-psk
     if [[ -n "{{ api_url }}" ]]; then
       just put-api-url "{{ api_url }}"
     fi
@@ -202,7 +205,7 @@ diy api_url=env("FLIPBUDDY_API_URL", ""):
     echo "→ diy $port"
     wait_spin mpremote connect "$port" cp {{ device_py }} :
     python3 scripts/gen_ap_psk.py --ensure --quiet
-    wait_spin mpremote connect "$port" cp ap_psk.json :
+    just put-ap-psk
     if [[ -n "{{ api_url }}" ]]; then
       just put-api-url "{{ api_url }}"
     fi

@@ -18,6 +18,12 @@ def test_firmware_version():
     assert pairing.FIRMWARE_VERSION == "0.2.1"
 
 
+def test_claim_url_default_is_production_v1():
+    assert pairing.DEFAULT_API.rstrip("/").endswith("/v1/api")
+    assert pairing.claim_url() == "https://api.flipbuddy.app/v1/api/devices/claim/"
+    assert "/v2/api/" not in pairing.claim_url()
+
+
 def test_http_401_403_surface_as_auth_error():
     err = http_result_for_status("401", "")
     assert is_http_auth_error(err)
@@ -69,6 +75,22 @@ def test_recover_after_401_already_cleared_does_not_save():
     cfg = _FakeConfig(identify=False)
     assert pairing.recover_after_auth_reject(cfg) is True
     assert cfg.saved is False
+
+
+def test_ota_skips_while_pairing_identify():
+    cfg = types.SimpleNamespace(
+        running={
+            "settings": {
+                "ota_enabled": True,
+                "pairing_identify": True,
+                "ota_address": "https://api.flipbuddy.app/v1/api/sensor/ota/",
+            }
+        }
+    )
+    trk = types.SimpleNamespace(running={})
+    addr, skip = pairing.ota_should_install(trk, cfg)
+    assert addr is None
+    assert skip == "pairing_identify"
 
 
 def test_ota_enabled_false_skips():
@@ -396,6 +418,34 @@ def test_host_ensure_reuses_existing_json(tmp_path, monkeypatch, capsys):
     assert "2345 6789" in out
 
 
+def test_host_ensure_regenerates_wrong_length(tmp_path, monkeypatch, capsys):
+    mod = _load_gen_ap_psk()
+    (tmp_path / "ap_psk.json").write_text(
+        '{"ap_psk": "9CD36BM9JCW7P7Y4"}\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mod, "generate_ap_psk", lambda length=8: "ABCDEFGH")
+    assert mod.main(["--ensure", "--quiet"]) == 0
+    assert json.loads((tmp_path / "ap_psk.json").read_text(encoding="utf-8")) == {
+        "ap_psk": "ABCDEFGH"
+    }
+    out = capsys.readouterr().out
+    assert "ABCD EFGH" in out
+    assert "9CD36BM9JCW7P7Y4" not in out
+
+
+def test_identify_blink_once_on_boot_not_held_in_active():
+    src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+    fetch = src.split("async def fetch_config", 1)[1].split("async def calibrate", 1)[0]
+    assert "pairing_identify_blink_once" in fetch
+    show = src.split("async def show_face_indicator", 1)[1].split("def _face_from_name", 1)[0]
+    assert "IDENTIFY_GREEN" not in show
+    assert "pairing_identify_blink_once" not in show
+    helper = src.split("async def pairing_identify_blink_once", 1)[1].split("class BootFSM", 1)[0]
+    assert "range(4)" not in helper
+    assert 'set_all_pixels(np_obj, "#000000")' in helper
+
+
 def test_set_all_pixels_green():
     class Fake:
         n = 6
@@ -408,8 +458,9 @@ def test_set_all_pixels_green():
             pass
 
     np = Fake()
-    set_all_pixels(np, IDENTIFY_GREEN)
+    set_all_pixels(np, IDENTIFY_GREEN, intensity_level=50)
     assert all(p != (0, 0, 0) for p in np.data)
+    assert all(p[1] > p[0] and p[1] > p[2] for p in np.data)
 
 
 def test_pairing_portal_show_leds_all_six_yellow_then_shutdown_cuts_vcc():

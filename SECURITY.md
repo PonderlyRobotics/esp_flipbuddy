@@ -52,7 +52,7 @@ If a cube has been offline for a long time and no longer talks to the dashboard,
 
 ## SoftAP captive portal (HTTP, PIN, Wi‑Fi)
 
-When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑reset into a temporary **WPA2‑PSK** SoftAP and serve a captive portal over **HTTP** at `http://10.20.30.40/`. Claimed cubes without a host `ap_psk` still use SSID **`FlipBuddy`** and password **`FB` + last 6 alphanumeric characters of `device_id`**. After `just gen-ap-psk`, join SSID is **`FlipBuddy-XXXX`** and the password is the printed NVS value (not derived from the MAC). Unclaimed pairing uses that same PSK and has **no PIN**; type home Wi-Fi on a desk you control (HTTP after WPA2 join). USB-face maintenance still needs the setup PIN for Wi-Fi writes. It is **not** a hardened remote admin interface.
+When the **SoftAP cutout** is up (`back_cutout`, opposite the USB‑C port, and AP mode is enabled), the cube can soft‑reset into a temporary **WPA2‑PSK** SoftAP and serve a captive portal over **HTTP** at `http://10.20.30.40/`. Claimed cubes without a host `ap_psk` still use SSID **`FlipBuddy`** and password **`FB` + last 6 alphanumeric characters of `device_id`**. After `just gen-ap-psk`, join SSID is **`FlipBuddy-XXXX`** and the password is the printed NVS value (not derived from the MAC). Unclaimed pairing uses that same PSK and has **no PIN**; type home Wi-Fi on a desk you control (HTTP after WPA2 join). Claimed SoftAP maintenance still needs the setup PIN for Wi-Fi writes. It is **not** a hardened remote admin interface.
 
 ### Risks (honest)
 
@@ -63,7 +63,7 @@ When the **USB‑C face** is up (and AP mode is enabled), the cube can soft‑re
 | **PIN over HTTP** | Unlocking settings (or setting a custom PIN) sends the setup PIN in HTTP form posts. A listener already on that SoftAP can capture it for that session. |
 | **Wi‑Fi password over HTTP** | After unlock, saving a home SSID/password also uses cleartext forms. Prefer doing this on a private desk, not a shared café radio environment. |
 | **Factory default PIN is derivable** | Default unlock PIN = **last 6 alphanumeric characters of `device_id`** (uppercased). Same people who can compute the join PSK can compute the factory PIN until you set a custom PIN. |
-| **`/reset` is not PIN‑gated** | Physical possession of the cube (USB face + SoftAP) is treated as enough to reboot. That is a usability choice; it is not remote reset over the internet. `/reset` still works after PIN lockout. |
+| **`/reset` is not PIN‑gated** | Physical possession of the cube (SoftAP cutout + SoftAP) is treated as enough to reboot. That is a usability choice; it is not remote reset over the internet. `/reset` still works after PIN lockout. |
 | **Status without unlock** | Time, battery, face map, and local activity summaries are readable without the PIN so the portal stays useful when locked. |
 | **Multi‑client shared unlock** | Unlock is **device‑global for that SoftAP session**, not per phone. After one client unlocks, **any other client already on (or joining) the SoftAP** can POST Wi‑Fi / PIN / LED test without knowing the PIN until idle timeout, lock, or SoftAP end. |
 
@@ -76,13 +76,13 @@ These do not make SoftAP “secure against a motivated local attacker,” but th
 | Measure | Detail |
 |---------|--------|
 | **WPA2-PSK on the radio** | SoftAP is `AUTH_WPA_WPA2_PSK`, not open. Casual neighbors cannot associate without the 8-character join password. Portal stays HTTP `:80` (phone TLS on SoftAP would OOM and break captive detect). |
-| **Physical access required** | SoftAP starts only when the cube is on the USB face (and AP mode is enabled), via soft‑reset into a short maintenance session—not from arbitrary remote wake. |
+| **Physical access required** | SoftAP starts only when the cube is on the SoftAP cutout (and AP mode is enabled), via soft-reset into a short maintenance session, not from arbitrary remote wake. |
 | **Time‑bound session** | SoftAP portal runs about **5 minutes**, then SoftAP is stopped and the device deep‑sleeps. Unlock idle timeout is also about **5 minutes** of inactivity. |
 | **Session unlock, not always‑on admin** | Status is open; **Wi‑Fi write, PIN change, and LED test** need a successful PIN unlock for that SoftAP session. Prefer **only one phone** on `FlipBuddy` while unlocked; use **Lock settings** when finished. |
 | **Custom PIN** | After first unlock, set a custom 4–16 alphanumeric PIN in NVS so the factory `device_id` rule no longer applies. |
 | **Failed attempt limit** | Wrong PINs are counted; after **8** failures unlock is refused until reboot (portal **Reset device** or power‑cycle). Status and `/reset` remain available. |
 | **No `device_token` on SoftAP** | The API device token is never shown or written on the portal. |
-| **Cooldown after SoftAP** | Handoff marks reduce SoftAP soft‑reset loops while the cube remains on the USB face. Leave the USB face before expecting SoftAP again. |
+| **Cooldown after SoftAP** | Handoff marks reduce SoftAP soft-reset loops while the cube remains on the SoftAP cutout. Leave that cutout before expecting SoftAP again. |
 
 ### What you should do as a builder
 

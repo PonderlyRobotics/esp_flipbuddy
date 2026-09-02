@@ -69,7 +69,10 @@ _MOVED = (
     "CALIBRATION_BLUE",
     "MAX_INTENSITY",
     "DEFAULT_INTENSITY_LEVEL",
+    "LED_PINOUT",
     "TRIAD_FACES",
+    "USB_CUTOUT",
+    "SOFTAP_CUTOUT",
     "ENABLE_SOFTAP_INDICATOR",
     "SOFTAP_LED_COLOR",
     "SETTLE_HZ",
@@ -165,6 +168,70 @@ def test_supermini_pin_map():
     assert settings.DEBUG is False
     assert settings.SETTLE_STILL_MS == 10000
     assert settings.FIRMWARE_VERSION == "0.2.1"
+
+
+def test_led_pinout_matches_physical_chain():
+    """DIN 0..5: front, bottom, back, left, top, right."""
+    import settings
+
+    p = settings.LED_PINOUT
+    assert p["front"]["led"] == 0
+    assert p["bottom"]["led"] == 1
+    assert p["back"]["led"] == 2
+    assert p["left"]["led"] == 3
+    assert p["top"]["led"] == 4
+    assert p["right"]["led"] == 5
+    usb = {p[f]["led"] for f in settings.TRIAD_FACES[settings.USB_CUTOUT]}
+    softap = {p[f]["led"] for f in settings.TRIAD_FACES[settings.SOFTAP_CUTOUT]}
+    assert settings.USB_CUTOUT == "front_cutout"
+    assert settings.SOFTAP_CUTOUT == "back_cutout"
+    assert settings.TRIAD_FACES["front_cutout"] == ("top", "front", "right")
+    assert settings.TRIAD_FACES["back_cutout"] == ("left", "back", "bottom")
+    assert usb == {4, 0, 5}
+    assert softap == {3, 2, 1}
+
+
+def test_overlay_face_from_tilt_matches_led_pinout():
+    from settings import overlay_face_from_tilt as face
+
+    z = (0, 0, 0)
+    assert face(*z, 0, 0, 1, 0, 0) == "left"
+    assert face(*z, 0, 0, -1, 0, 0) == "right"
+    assert face(*z, 1, 0, 0, 0, 0) == "bottom"
+    assert face(*z, -1, 0, 0, 0, 0) == "top"
+    assert face(*z, 0, 1, 0, 0, 0) == "front"
+    assert face(*z, 0, -1, 0, 0, 0) == "back"
+    assert face(*z, 0, 0, 0, 130, -40) == "front_cutout"
+    assert face(*z, 0, 0, 0, -40, 30) == "back_cutout"
+
+
+def test_apply_orientation_overlay_patches_frozen_pinout():
+    import settings
+    import rgb
+
+    frozen = {
+        "back": {"led": 0, "type": "neopixel"},
+        "left": {"led": 1, "type": "neopixel"},
+        "front": {"led": 2, "type": "neopixel"},
+        "bottom": {"led": 3, "type": "neopixel"},
+        "right": {"led": 4, "type": "neopixel"},
+        "top": {"led": 5, "type": "neopixel"},
+    }
+    rgb.pinout = frozen
+    settings.apply_orientation_overlay()
+    assert frozen["front"]["led"] == 0
+    assert frozen["bottom"]["led"] == 1
+    assert frozen["back"]["led"] == 2
+    assert frozen is not settings.LED_PINOUT
+    rgb.pinout = settings.LED_PINOUT
+    settings.apply_orientation_overlay()
+    assert rgb.pinout is settings.LED_PINOUT
+    assert settings.LED_PINOUT["front"]["led"] == 0
+    assert settings.LED_PINOUT["bottom"]["led"] == 1
+    assert settings.LED_PINOUT["back"]["led"] == 2
+    import mpu6050
+
+    assert mpu6050.face_from_tilt is settings.overlay_face_from_tilt
 
 
 def test_gpio_7_8_are_led_rail_not_i2c():

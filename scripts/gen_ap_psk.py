@@ -25,16 +25,23 @@ def generate_ap_psk(length: int = PSK_LEN) -> str:
     return "".join(secrets.choice(ALPHABET) for _ in range(length))
 
 
+def compact_ap_psk(psk: str) -> str:
+    return "".join(ch.upper() for ch in str(psk or "") if ch.upper() in ALPHABET)
+
+
 def format_ap_psk_display(psk: str) -> str:
     """XXXX XXXX for reading. Join Wi-Fi without the space."""
-    compact = "".join(ch.upper() for ch in str(psk or "") if ch.upper() in ALPHABET)
-    if len(compact) == 8:
+    compact = compact_ap_psk(psk)
+    if len(compact) == PSK_LEN:
         return f"{compact[:4]} {compact[4:]}"
     return compact or str(psk or "")
 
 
 def load_host_psk(root: Path | None = None) -> str | None:
-    """Read host SoftAP password from ap_psk.json."""
+    """Read an 8-character host SoftAP password from ap_psk.json.
+
+    Longer leftovers (old generators) are ignored so --ensure can replace them.
+    """
     root = root or Path(".")
     json_path = root / PSK_FILE.name
     if not json_path.is_file():
@@ -45,8 +52,10 @@ def load_host_psk(root: Path | None = None) -> str | None:
         return None
     if not isinstance(data, dict) or not data.get("ap_psk"):
         return None
-    psk = str(data.get("ap_psk") or "").strip()
-    return psk or None
+    compact = compact_ap_psk(str(data.get("ap_psk") or ""))
+    if len(compact) != PSK_LEN:
+        return None
+    return compact
 
 
 def persist_ap_psk(psk: str, root: Path | None = None) -> Path:

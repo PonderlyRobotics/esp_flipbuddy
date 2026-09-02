@@ -71,16 +71,28 @@ ALLOWED_API_HOSTS = ("api.flipbuddy.app", "localhost", "127.0.0.1")
 AP_PSK_FILE = "ap_psk.json"
 API_URL_FILE = "api_url.txt"
 
-# --- LED / RGB ---
+# --- LED / RGB ---  DIN 0..5: front, bottom, back, left, top, right.
 CALIBRATION_RED = 1.0
 CALIBRATION_GREEN = 1.0
 CALIBRATION_BLUE = 1.0
 MAX_INTENSITY = 50
 DEFAULT_INTENSITY_LEVEL = 1
+LED_PINOUT = {
+    "front": {"led": 0, "type": "neopixel"},
+    "bottom": {"led": 1, "type": "neopixel"},
+    "back": {"led": 2, "type": "neopixel"},
+    "left": {"led": 3, "type": "neopixel"},
+    "top": {"led": 4, "type": "neopixel"},
+    "right": {"led": 5, "type": "neopixel"},
+}
+# front_cutout: USB-C port + stop (top/front/right).
+# back_cutout: SoftAP corner; yellow triad stays left/back/bottom.
 TRIAD_FACES = {
-    "front_cutout": ("right", "top", "front"),
+    "front_cutout": ("top", "front", "right"),
     "back_cutout": ("left", "back", "bottom"),
 }
+USB_CUTOUT = "front_cutout"
+SOFTAP_CUTOUT = "back_cutout"
 ENABLE_SOFTAP_INDICATOR = True
 SOFTAP_LED_COLOR = "#FFFF00"
 IDENTIFY_GREEN = "#00FF00"
@@ -101,10 +113,60 @@ FAST_TIMEOUT_S = const(2)
 DEFAULT_TIMEOUT_S = const(5)
 
 
+def overlay_face_from_tilt(
+    tilt_x,
+    tilt_y,
+    tilt_z,
+    x,
+    y,
+    z,
+    roll,
+    pitch,
+    margin=0.2,
+    angle_margin=10,
+):
+    """Face names match LED_PINOUT. USB-up pose is front_cutout (stop)."""
+    if (115 <= roll <= 145) and (-50 <= pitch <= -30):
+        return USB_CUTOUT
+    if (-60 <= roll <= -20) and (20 <= pitch <= 40):
+        return SOFTAP_CUTOUT
+    if -margin <= x <= margin and -margin <= y <= margin:
+        return "left" if z > 0 else "right"
+    if -margin <= y <= margin and -margin <= z <= margin:
+        return "bottom" if x > 0 else "top"
+    if -margin <= x <= margin and -margin <= z <= margin:
+        return "front" if y > 0 else "back"
+    if abs(tilt_x) > 90 or abs(tilt_y) > 90 or abs(tilt_z) > 90:
+        return "out_margin"
+    if abs(roll) > angle_margin or abs(pitch) > angle_margin:
+        return "out_margin"
+    return "unknown"
+
+
+def apply_orientation_overlay():
+    """Patch frozen rgb.pinout / mpu6050.face_from_tilt from this LittleFS file."""
+    try:
+        import rgb
+
+        pinout = getattr(rgb, "pinout", None)
+        if pinout is not None and pinout is not LED_PINOUT:
+            pinout.clear()
+            pinout.update(LED_PINOUT)
+    except Exception:
+        pass
+    try:
+        import mpu6050
+
+        mpu6050.face_from_tilt = overlay_face_from_tilt
+    except Exception:
+        pass
+
+
 def configure_board_hw():
-    """LED VCC rail + VIN ADC."""
+    """LED VCC rail + VIN ADC. Also apply Super Mini face names onto frozen helpers."""
     from machine import ADC, Pin
 
+    apply_orientation_overlay()
     np_vcc = Pin(NP_VCC_PIN, Pin.OUT, Pin.PULL_DOWN, drive=Pin.DRIVE_2)
     np_vcc.off()
     try:

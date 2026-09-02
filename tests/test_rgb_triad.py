@@ -1,4 +1,4 @@
-"""Host tests for cutout triad static lighting (SoftAP USB-face indicator)."""
+"""Host tests for cutout triad static lighting (SoftAP back-cutout indicator)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +24,7 @@ class _NP:
 
 
 def test_back_cutout_triad_static_is_yellow_on_usb_cutout_leds():
-    """USB face is back_cutout: left / back / bottom."""
+    """SoftAP corner is back_cutout: left / back / bottom (same yellow triad)."""
     np = _NP()
     rgb.set_cutout_triad_static(np, "back_cutout", "#FFFF00")
     on = {
@@ -48,6 +48,8 @@ def test_front_cutout_triad_does_not_light_back_cutout_leds():
     assert np[pinout["back"]["led"]] == (0, 0, 0)
     assert np[pinout["bottom"]["led"]] == (0, 0, 0)
     assert np[pinout["right"]["led"]] != (0, 0, 0)
+    assert np[pinout["top"]["led"]] != (0, 0, 0)
+    assert np[pinout["front"]["led"]] != (0, 0, 0)
 
 
 def test_active_clears_stop_so_blink_can_start_after_inactive():

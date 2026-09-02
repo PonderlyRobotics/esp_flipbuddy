@@ -2,7 +2,7 @@
 Lightweight SoftAP maintenance session.
 
 Entered from main.py early SoftAP gate after soft_reset when RTC mark FBAP1 is set
-(USB face). boot.py is not used.
+(SoftAP cutout). boot.py is not used.
 
 Bring SoftAP up with minimal imports first (more free RAM), then load the
 captive portal stack (models, ap_mode, ...). SoftAP failure returns so main can

@@ -39,6 +39,11 @@ def _ensure_micropython_shims():
     sys.modules["ujson"].dump = stdjson.dump
     sys.modules["ujson"].load = stdjson.load
 
+    import struct as _struct
+
+    sys.modules["ustruct"].pack = _struct.pack
+    sys.modules["ustruct"].unpack = _struct.unpack
+
     import time as real_time
 
     utime = sys.modules["utime"]
@@ -58,6 +63,7 @@ def _ensure_micropython_shims():
         machine.deepsleep = MagicMock()
         machine.unique_id = MagicMock(return_value=b"\xaa\xbb\xcc\xdd\xee\xff")
         machine.Pin = MagicMock
+        machine.I2C = MagicMock
         machine.ADC = MagicMock
         machine.RTC = MagicMock
         machine.Timer = MagicMock

@@ -4,20 +4,12 @@ import uasyncio as asyncio
 from settings import (
     DEFAULT_INTENSITY_LEVEL,
     ENABLE_SOFTAP_INDICATOR,
+    LED_PINOUT as pinout,
     MAX_INTENSITY,
     SOFTAP_LED_COLOR,
     TRIAD_FACES,
 )
 from util import suppress
-
-pinout = {
-    "front": {"led": 0, "type": "neopixel"},
-    "bottom": {"led": 1, "type": "neopixel"},
-    "back": {"led": 2, "type": "neopixel"},
-    "left": {"led": 3, "type": "neopixel"},
-    "top": {"led": 4, "type": "neopixel"},
-    "right": {"led": 5, "type": "neopixel"},
-}
 
 
 def _hex_to_np_rgb(hex_code, intensity_level=DEFAULT_INTENSITY_LEVEL):
@@ -67,11 +59,13 @@ def _pixel_count(np_obj):
     return n
 
 
-def set_all_pixels(np_obj, hex_code):
+def set_all_pixels(np_obj, hex_code, intensity_level=None):
     """Light every NeoPixel a solid color (pairing identify)."""
     if np_obj is None:
         return
-    rgb = _hex_to_np_rgb(hex_code)
+    if intensity_level is None:
+        intensity_level = DEFAULT_INTENSITY_LEVEL
+    rgb = _hex_to_np_rgb(hex_code, intensity_level)
     for i in range(_pixel_count(np_obj)):
         np_obj[i] = rgb
     np_obj.write()
@@ -80,7 +74,7 @@ def set_all_pixels(np_obj, hex_code):
 def show_pairing_portal_leds(np_obj, np_vcc=None):
     """All six LEDs solid yellow while unclaimed pairing SoftAP is up.
 
-    Same color as claimed USB-face SoftAP. No-op when ENABLE_SOFTAP_INDICATOR is False.
+    Same color as claimed SoftAP-cutout yellow. No-op when ENABLE_SOFTAP_INDICATOR is False.
     """
     if not ENABLE_SOFTAP_INDICATOR:
         return

@@ -161,6 +161,8 @@ def ota_settings_blob(config=None, tracker=None):
 
 def ota_should_install(tracker_obj, config=None):
     """Return (ota_url, None) or (None, skip_reason). Prefers settings.ota_address."""
+    if pairing_identify_on(config):
+        return None, "pairing_identify"
     if not ota_settings_enabled(config=config, tracker=tracker_obj):
         return None, "ota_enabled is false"
     blob = ota_settings_blob(config=config, tracker=tracker_obj)

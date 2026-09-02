@@ -138,6 +138,7 @@ from main import (
     BootFSM,
     ActiveFSM,
     UploadFSM,
+    face_is_stop,
     fibonacci,
     apply_backoff,
     reset_backoff,
@@ -606,6 +607,22 @@ async def test_start_ap_mode_finalizes_open_sessions():
     assert active.ap_mode is True
 
 
+async def test_front_cutout_is_always_stop():
+    usb = MagicMock(orientation="front_cutout", stop_face=False)
+    assert face_is_stop(usb) is True
+    softap = MagicMock(orientation="back_cutout", stop_face=False)
+    assert face_is_stop(softap) is False
+    softap.stop_face = True
+    assert face_is_stop(softap) is True
+    assert face_is_stop(None) is False
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front_cutout.stop_face = False
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.front_cutout
+    assert active.is_stop_face() is True
+
+
 async def test_stop_face_finalizes_even_when_active_face_differs():
     """Stop face must stop_all even if active_face is still the activity face."""
     cfg = make_fake_config()
@@ -931,6 +948,10 @@ if __name__ == "__main__":
         (
             "test_start_ap_mode_finalizes_open_sessions",
             test_start_ap_mode_finalizes_open_sessions,
+        ),
+        (
+            "test_front_cutout_is_always_stop",
+            test_front_cutout_is_always_stop,
         ),
         (
             "test_stop_face_finalizes_even_when_active_face_differs",

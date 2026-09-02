@@ -1,6 +1,6 @@
 # SoftAP early gate — MUST stay before heavy imports.
 # After machine.soft_reset() the heap is clean; we bring SoftAP up here (no boot.py).
-# RTC marks: FBAP1 = run SoftAP on this boot; APDON = already tried this USB face.
+# RTC marks: FBAP1 = run SoftAP on this boot; APDON = already tried this SoftAP cutout.
 _AP_BOOT_MARK = b"FBAP1"
 _AP_DONE_MARK = b"APDON"
 
@@ -61,12 +61,10 @@ from http import (
     async_http_get,
     async_post_request,
     async_rotate_device_token,
-    get_request,
     is_http_auth_error,
 )
 
 import esp32
-import mip
 import neopixel
 import uasyncio as asyncio
 import utime as time
@@ -84,6 +82,7 @@ from machine import (
     wake_reason,
 )
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
+from pairing import pairing_identify_on
 from mpu6050 import cube_face_upward, sample_face_accel, sensor_init
 from network_helper import (
     async_do_connect,
@@ -106,6 +105,7 @@ from settings import (
     I2C_SCL,
     I2C_SDA,
     IDENTIFY_GREEN,
+    MAX_INTENSITY,
     MAX_SLEEP_TIME,
     MPU_INT_PIN,
     NP_DATA_PIN,
@@ -116,7 +116,9 @@ from settings import (
     SETTLE_STILL_MS,
     SETTLE_TIMEOUT_S,
     SOFTAP_CAPTIVE_PORTAL_ENABLED,
+    SOFTAP_CUTOUT,
     TIMER_NUM,
+    USB_CUTOUT,
     USB_VOLTAGE_THRESHOLD,
     configure_board_hw,
 )
@@ -341,7 +343,7 @@ def retrieve_last_backoff(default_sleep_time):
 
 
 def is_ap_cooldown():
-    """True if we already attempted AP for this USB-face placement."""
+    """True if we already attempted AP for this SoftAP-cutout placement."""
     try:
         mem = rtc_mem.memory()
         return bool(mem and mem[:5] == _AP_DONE_MARK)
@@ -350,7 +352,7 @@ def is_ap_cooldown():
 
 
 def set_ap_cooldown():
-    """Block another AP clean-reboot until USB face is left."""
+    """Block another AP clean-reboot until the SoftAP cutout is left."""
     try:
         rtc_mem.memory(_AP_DONE_MARK)
     except Exception:
@@ -358,13 +360,22 @@ def set_ap_cooldown():
 
 
 def clear_ap_cooldown():
-    """Allow AP again after leaving back_cutout."""
+    """Allow AP again after leaving the SoftAP cutout."""
     try:
         mem = rtc_mem.memory()
         if mem and mem[:5] in (_AP_DONE_MARK, _AP_BOOT_MARK):
             reset_backoff(DEFAULT_SLEEP_TIME)
     except Exception:
         pass
+
+
+def face_is_stop(face):
+    """USB-C cutout is always stop; cloud stop_face still counts on other faces."""
+    if face is None:
+        return False
+    if getattr(face, "orientation", None) == USB_CUTOUT:
+        return True
+    return bool(getattr(face, "stop_face", False))
 
 
 def request_ap_soft_reset_handoff():
@@ -795,6 +806,9 @@ async def _ota_stream_sha256(url, headers, timeout=120, part=None, part_size=0):
 async def ota_weekly_check(tracker_obj, config=None, remote=None):
     """main.py-only OTA. Frozen pairing/models are not used (fast-track FS is main.py)."""
     settings = _ota_settings(remote, config)
+    if settings.get("pairing_identify") or pairing_identify_on(config):
+        print("OTA skipped: pairing_identify")
+        return False
     if not settings.get("ota_enabled"):
         print("OTA skipped: ota_enabled is false")
         return False
@@ -871,6 +885,16 @@ async def ota_weekly_check(tracker_obj, config=None, remote=None):
     except Exception as e:
         print("OTA check failed:", e)
         return False
+
+
+async def pairing_identify_blink_once(np_obj, np_vcc=None):
+    """One green pulse after BootFSM GET. Off afterward. Next boot can pulse again."""
+    if np_vcc:
+        np_vcc.on()
+        time.sleep_ms(50)
+    set_all_pixels(np_obj, IDENTIFY_GREEN, intensity_level=MAX_INTENSITY)
+    await asyncio.sleep_ms(400)
+    set_all_pixels(np_obj, "#000000")
 
 
 # ------------------------------------------
@@ -1054,6 +1078,8 @@ class BootFSM(BaseFSM):
                 self.config.apply(self.config.running)
                 self.config.save()
             await ota_weekly_check(self.tracker, self.config, self.remote_config)
+            if pairing_identify_on(self.config):
+                await pairing_identify_blink_once(self.np_obj, self.np_vcc)
 
     async def calibrate(self):
         dprint("Applying calibration...")
@@ -1080,6 +1106,9 @@ class BootFSM(BaseFSM):
         await disconnect_wifi()
 
     async def enter_deep_sleep(self):
+        if pairing_identify_on(self.config):
+            dprint("BootFSM skip deep sleep (pairing identify)")
+            return
         # Short sleep then DEEPSLEEP_RESET → ActiveFSM (online or offline tracking)
         dprint("BootFSM → deep sleep 100ms (hand off to ActiveFSM)")
         await prepare_for_deep_sleep(self.np_vcc, self.np_obj, 100, do_mpu_config=False)
@@ -1122,10 +1151,6 @@ class ActiveFSM(BaseFSM):
             )
             * 1000
         )
-        if self.config.running["settings"].get("pairing_identify"):
-            # USB confirm poll: at least every 30 s.
-            if self.sleep_ms > 30_000:
-                self.sleep_ms = 30_000
         self.need_upload = False
         self.ap_mode = False
 
@@ -1157,7 +1182,7 @@ class ActiveFSM(BaseFSM):
                             "pairing_identify", False
                         )
                         and self.face_obj
-                        and self.face_obj.orientation == "back_cutout"
+                        and self.face_obj.orientation == SOFTAP_CUTOUT
                         and not is_ap_cooldown()
                     ),
                     lambda: self.start_ap_mode(),
@@ -1201,26 +1226,9 @@ class ActiveFSM(BaseFSM):
     def is_stop_face(self):
         wdt_feed()
         dprint(self.face_obj)
-        if self.face_obj and hasattr(self.face_obj, "stop_face"):
-            return self.face_obj.stop_face
-        return False
-
-    async def _pairing_identify_blink(self):
-        """All LEDs blink green. Token is already in NVS; this is pending_confirm."""
-        if self.np_vcc:
-            self.np_vcc.on()
-            time.sleep_ms(50)
-        for _i in range(4):
-            set_all_pixels(self.np_obj, IDENTIFY_GREEN)
-            await asyncio.sleep_ms(250)
-            set_all_pixels(self.np_obj, "#000000")
-            await asyncio.sleep_ms(250)
-        set_all_pixels(self.np_obj, IDENTIFY_GREEN)
+        return face_is_stop(self.face_obj)
 
     async def show_face_indicator(self):
-        if self.config.running["settings"].get("pairing_identify"):
-            await self._pairing_identify_blink()
-            return
         if wake_reason() == PIN_WAKE:
             self.np_vcc.on()
             assigned_face = [
@@ -1359,8 +1367,8 @@ class ActiveFSM(BaseFSM):
             self.face_obj = getattr(self.tracker, face_name, None)
         else:
             dprint(f"ActiveFSM → settled face: {self.face_obj.orientation}")
-        # Leaving USB face clears AP one-shot cooldown so next USB placement works
-        if not self.face_obj or self.face_obj.orientation != "back_cutout":
+        # Leaving the SoftAP cutout clears AP one-shot cooldown.
+        if not self.face_obj or self.face_obj.orientation != SOFTAP_CUTOUT:
             clear_ap_cooldown()
         if self.face_obj is None:
             dprint("No such face/activity_name")
@@ -1397,7 +1405,7 @@ class ActiveFSM(BaseFSM):
         s.enable_low_power_dmp_motion_detection()
 
     async def start_ap_mode(self):
-        """USB face: finalize open sessions, save, then soft_reset into SoftAP."""
+        """SoftAP cutout: finalize open sessions, save, then soft_reset into SoftAP."""
         dprint("AP mode: finalize open sessions before soft_reset...")
         orient = self.face_obj.orientation if self.face_obj else None
         try:
@@ -1486,7 +1494,7 @@ class ActiveFSM(BaseFSM):
         need_upload = (
             last_upload == ""
             or time_since_upload >= upload_freq
-            or (self.face_obj and self.face_obj.stop_face)
+            or face_is_stop(self.face_obj)
             or has_log
             or usb_connected
             or wake_reason() == PIN_WAKE
@@ -1656,7 +1664,7 @@ class UploadFSM(BaseFSM):
         # While on stop face we want the Fibonacci counter to keep accumulating
         # so sleep times grow (36s → 54s → 90s ... up to 15min).
         face = self.active_result.get("face_obj")
-        is_stop = bool(face and getattr(face, "stop_face", False))
+        is_stop = face_is_stop(face)
         if not is_stop:
             base = self.config.running["settings"].get(
                 "orientation_check_frequency", DEFAULT_SLEEP_TIME
@@ -1735,6 +1743,21 @@ async def main():
         # Cold boot / soft reset / hard reset: WiFi + NTP + remote config
         boot = BootFSM(config, tracker, np_obj, adc_vin, np_vcc)
         await boot.run()
+        # USB often cannot DEEPSLEEP_RESET. Confirm green must still run.
+        if pairing_identify_on(config):
+            active = ActiveFSM(config, tracker, np_obj, adc_vin, np_vcc)
+            active_result = await active.run()
+            upload = UploadFSM(
+                config,
+                tracker,
+                np_obj,
+                adc_vin,
+                np_vcc,
+                TOKEN,
+                HEADERS,
+                active_result,
+            )
+            await upload.run()
 
 
 if __name__ == "__main__":

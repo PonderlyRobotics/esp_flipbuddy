@@ -531,10 +531,9 @@ def face_from_tilt(
 ):
     """Classify upward face from one MPU tilt_refin() sample (g + roll/pitch)."""
     if (115 <= roll <= 145) and (-50 <= pitch <= -30):
-        return "back_cutout"
-    if (-60 <= roll <= -20) and (20 <= pitch <= 40):
         return "front_cutout"
-    # Renamed faces: back→front, left→bottom, front→back, bottom→left, right→top, top→right
+    if (-60 <= roll <= -20) and (20 <= pitch <= 40):
+        return "back_cutout"
     if -margin <= x <= margin and -margin <= y <= margin:
         return "left" if z > 0 else "right"
     if -margin <= y <= margin and -margin <= z <= margin:

@@ -9,6 +9,7 @@ v0.2.0 cubes can USB-flash this image (NVS is wiped: pair again) or wait for an 
 ## Highlights vs v0.2.0
 
 - **LittleFS overlay:** Super Mini GPIO and product tunables live in `settings.py` on the filesystem. Frozen helpers stay in the image. `just fast-track` / `just put-main` copy `main.py` **and** `settings.py`, plus a host SoftAP password. Do not skip `settings.py` on a manual `mpremote` copy.
+- **Face names:** DIN 0..5 is front, bottom, back, left, top, right. `front_cutout` is the USB-C port and stop (top/front/right). `back_cutout` is SoftAP; yellow triad stays left/back/bottom. The overlay patches frozen `rgb` / `mpu6050` so you do not need a new freeze to pick this up.
 - **LED rail:** unclaimed pairing brings the rail up once in the portal (`configure_board_hw`). Claimed boot does the same before constructing the NeoPixel strip.
 - **Still claim pairing + dual-OTA:** Add Device, join **`FlipBuddy-XXXX`**, type house Wi-Fi plus the 8-character code. USB image is `*-ota.bin`. App-slot packages stay on flipbuddy.app.
 
@@ -54,7 +55,8 @@ App-slot OTA packages are served by flipbuddy.app. They are **not** attached to 
 Expected SHA-256:
 
 ```
-SHA256SUMS on this Release (filled after the freeze)
+3026b63a61414ef56c57b50450e9cf6e8228937d2ad9a416fbd9e9f45d5fb06f  esp32_s3_flipbuddy_0.2.1.bin
+43694c8659ef76a821913fd3b3501375b64e73f52266092f8ef72778200c9240  esp32_s3_flipbuddy_0.2.1-ota.bin
 ```
 
 ```bash

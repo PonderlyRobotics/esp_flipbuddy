@@ -16,6 +16,9 @@ GIT_COMMITTER_EMAIL = "YOUR_PONDERLY_NOREPLY@users.noreply.github.com"
 # Optional serial port override
 # AMPY_PORT = "/dev/ttyUSB0"
 
+# Optional API base for just fast-track / just diy
+# FLIPBUDDY_API_URL = "https://api.flipbuddy.app/v1/api/"
+
 # Default USB image for mise run release-sha / just flash-firmware
 # FLIPBUDDY_RELEASE_BIN = "build/esp32_s3_flipbuddy_0.2.1-ota.bin"
 

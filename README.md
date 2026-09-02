@@ -94,7 +94,7 @@ Wi-Fi is used for those check-ins, sometimes on the stop face, and when USB is p
 
 If Wi-Fi is down but credentials are already installed, the cube still boots and can log with defaults (last known face map). Full face colors, fresh names, and history still need flipbuddy.app for normal use.
 
-USB-C face up can open **SoftAP maintenance mode** (local captive portal). Unclaimed cubes use the same radio for **pairing** (next section). Blinking all leds red often means bad orientation or low battery. AI in the app can be turned off.
+The **USB-C port** cutout (`front_cutout`) is the **stop** face. The opposite cutout (`back_cutout`) can open **SoftAP maintenance mode** (local captive portal). Unclaimed cubes use the same radio for **pairing** (next section). Blinking all leds red often means bad orientation or low battery. AI in the app can be turned off.
 
 ## Pair from the cube Wi-Fi
 
@@ -102,7 +102,7 @@ First-time setup is **claim pairing**, not a JSON download.
 
 1. Create a free account at [flipbuddy.app](https://flipbuddy.app). **Add Device**, pick the physical cube, give it a name. The wizard shows an 8-character code (`XXXX-XXXX` on screen).
 2. Flash the FlipBuddy frozen image, then `just fast-track` (or `just diy` on stock). That puts `main.py`, `settings.py`, and a random SoftAP password on the cube. Serial / the host print the password as `XXXX XXXX` (spaces are only for reading).
-3. Keep **USB plugged in**. Join Wi-Fi **`FlipBuddy-XXXX`** (last 4 of the chip id, for example `FlipBuddy-323C`). Type the password **without** the space. While this pairing Wi-Fi is up, **all six LEDs stay solid yellow** (same `#FFFF00` as later USB-face SoftAP, which only lights the USB triad). If pairing fails and the cube comes back to the portal, yellow returns.
+3. Keep **USB plugged in**. Join Wi-Fi **`FlipBuddy-XXXX`** (last 4 of the chip id, for example `FlipBuddy-323C`). Type the password **without** the space. While this pairing Wi-Fi is up, **all six LEDs stay solid yellow** (same `#FFFF00` as later claimed SoftAP, which lights the back-cutout triad). If pairing fails and the cube comes back to the portal, yellow returns.
 4. Captive portal, or [http://10.20.30.40/](http://10.20.30.40/): house Wi-Fi plus the dashboard pairing code. House SSID/password stay on the cube. They are never posted to the API.
 5. Cube blinks **green**. In the app, confirm / **Start tracking**.
 
@@ -115,7 +115,7 @@ Unclaimed cube.
 
 If serial says `FATAL: no SoftAP join password`, run `just gen-ap-psk` and `just put-ap-psk`, then power-cycle. The image will not invent a password.
 
-**Dashboard Reset pairing** only invalidates the server token. Next step is **Add Device**. Forget the account on the cube only if it still thinks it is claimed (USB face up, PIN unlock, Forget FlipBuddy account). After a USB reflash, NVS is empty: skip Forget.
+**Dashboard Reset pairing** only invalidates the server token. Next step is **Add Device**. Forget the account on the cube only if it still thinks it is claimed (SoftAP cutout up, PIN unlock, Forget FlipBuddy account). After a USB reflash, NVS is empty: skip Forget.
 
 JSON from the device page is recovery: `just put-credentials`. `just fast-track` never copies that file.
 
@@ -137,7 +137,7 @@ That is the main reason to prefer the FlipBuddy frozen OTA image: I can ship a t
 
 ## SoftAP maintenance mode
 
-When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
+When the **SoftAP cutout** is up (`back_cutout`, opposite the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`. The USB‑C port cutout (`front_cutout`) is stop, not SoftAP.
 
 Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Release (**0.2.1**), **or** DIY/`just diy`. Fast track only pushes `main.py` + `settings.py` + SoftAP password on top of the frozen set (`credentials.json` is recovery, not fast-track). Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
 
@@ -148,11 +148,11 @@ Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Relea
 | Portal URL | [http://10.20.30.40/](http://10.20.30.40/) (captive portal usually opens this) |
 | Session length | About **5 minutes**, then SoftAP stops and the cube deep-sleeps |
 | Transport | **HTTP** on the encrypted radio (no TLS server) |
-| SoftAP LEDs | Claimed USB-face: solid **yellow** triad. Unclaimed pairing: all six LEDs yellow (see [LEDs](#leds-after-you-wake-the-cube)) |
+| SoftAP LEDs | Claimed SoftAP cutout: solid **yellow** triad (left, back, bottom). Unclaimed pairing: all six LEDs yellow (see [LEDs](#leds-after-you-wake-the-cube)) |
 
 ### Builder steps
 
-1. Put the **USB-C port face** up. Wait until the phone sees **`FlipBuddy-XXXX`** (or legacy **`FlipBuddy`** if this cube has no host `ap_psk`). Shake to wake if the cube slept.
+1. Put the **SoftAP cutout** up (opposite the USB-C port). Wait until the phone sees **`FlipBuddy-XXXX`** (or legacy **`FlipBuddy`** if this cube has no host `ap_psk`). Shake to wake if the cube slept.
 2. Join with the 8-character WPA2 password (host `ap_psk`, or `FB` + last 6 of `device_id` on legacy claimed cubes). Serial prints a PSK hint if you have a USB console. If no captive browser popup, open **http://10.20.30.40/**.
 3. Unlock with the **setup PIN** (below) if you need to change Wi‑Fi or PIN.
 4. Save home SSID/password if needed. Keep **only one phone** on `FlipBuddy` while settings are unlocked ([why](./SECURITY.md#softap-captive-portal-http-pin-wi-fi)).
@@ -160,7 +160,7 @@ Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Relea
    - Tap **Reset device** on the portal (preferred after clock issues), **or** wait for SoftAP to end (~5 min).
    - Flip to a **non‑cutout** face (activity or stop — not either shell cutout).
    - On the phone, leave `FlipBuddy` and rejoin your **home** Wi‑Fi.
-6. SoftAP again later: **leave the USB face first** (cooldown after a session), then put USB face up again.
+6. SoftAP again later: **leave the SoftAP cutout first** (cooldown after a session), then put that cutout up again.
 
 **Timeout vs Reset:** SoftAP timeout turns SoftAP off, deepsleeps briefly, then normal wake (may use home Wi‑Fi / NTP if already configured). **Reset device** (or power‑cycle) runs a full boot with forced Wi‑Fi + NTP — use that when the clock is wrong.
 
@@ -216,15 +216,14 @@ Quiet **timer** wakes (the cube already sitting on a face) skip the map and prev
 | Still time | **~10 s** wall-clock, then tracking blink |
 | Give up | **~40 s** of fidgeting, then skip tracking for this wake |
 
-### SoftAP USB-face LEDs
+### SoftAP cutout LEDs
 
-When the **USB‑C port face** is up and **claimed** SoftAP is running, the cube does **not** use activity colors for that session. It lights the **USB-cutout triad** solid **yellow** (`#FFFF00`, `SOFTAP_LED_COLOR` in `rgb.py`) for the whole ~5 minute portal. Unclaimed pairing SoftAP uses the same yellow on **all six** LEDs:
+When the **SoftAP cutout** is up (`back_cutout`) and **claimed** SoftAP is running, the cube does **not** use activity colors for that session. It lights the **back-cutout triad** solid **yellow** (`#FFFF00`, `SOFTAP_LED_COLOR` in `rgb.py`) for the whole ~5 minute portal. Unclaimed pairing SoftAP uses the same yellow on **all six** LEDs:
 
-| Orientation | LEDs (activity-face names) | DIN index |
-|-------------|----------------------------|-----------|
-| USB face (`back_cutout`) | left, back, bottom | 3, 2, 1 |
-
-The opposite cutout (stop / `front_cutout`) is right, top, front (DIN 5, 4, 0) and is not used for SoftAP.
+| Orientation | Role | LEDs (activity-face names) | DIN index |
+|-------------|------|----------------------------|-----------|
+| USB / stop (`front_cutout`) | USB-C port, stop tracking | top, front, right | 4, 0, 5 |
+| SoftAP (`back_cutout`) | maintenance portal | left, back, bottom | 3, 2, 1 |
 
 Yellow stays on after the portal LED self-test as well, so you can still see “maintenance is up.” Set `ENABLE_SOFTAP_INDICATOR = False` in `settings.py` if you want SoftAP with the strip dark.
 
@@ -412,7 +411,7 @@ Use the GPIO numbers on the silkscreen. Super Mini clones are not all identical.
 | I2C SCL | 12 |
 | Onboard LED (if used) | 48 |
 
-LED index order in `rgb.py` (DIN starts at 0): front, bottom, back, left, top, right.
+LED index order in `settings.py` `LED_PINOUT` (DIN starts at 0): front, bottom, back, left, top, right.
 
 Mount the MPU as in the PDF photos; wrong orientation means wrong faces with “working” firmware.
 
@@ -464,10 +463,10 @@ No activities are assigned on the device yet. Map faces in the free [dashboard](
 Unclaimed cubes type home Wi-Fi on the pairing page after `just fast-track`. House SSID/password stay in NVS on the cube and are never uploaded to the API. Already-claimed recovery: `just put-credentials` restores `device_id` / `device_token` only; a `wifi` entry in that JSON is ignored. After flash, NVS is empty: pair again, or set Wi-Fi from the [SoftAP captive portal](#softap-maintenance-mode) after PIN unlock. Check serial with `just shell` (115200) for connect / missing-PSK messages.
 
 **SoftAP / `FlipBuddy` Wi-Fi does not show up.**  
-Shake or wake the cube, put the **USB-C port face** up, and wait a few seconds. After `just fast-track` the SSID is **`FlipBuddy-XXXX`**, not always `FlipBuddy`. After a SoftAP session, the cube uses a **cooldown** while still on that face: flip to another face, then USB face up again. Confirm SoftAP modules are on the device (frozen image or DIY/`just diy`). Low battery or a failed SoftAP bring-up falls back to normal boot; serial (`just shell`) shows `ap_session` / SoftAP messages if you have a cable.
+Shake or wake the cube, put the **SoftAP cutout** up (opposite the USB-C port), and wait a few seconds. After `just fast-track` the SSID is **`FlipBuddy-XXXX`**, not always `FlipBuddy`. After a SoftAP session, the cube uses a **cooldown** while still on that face: flip to another face, then SoftAP cutout up again. Confirm SoftAP modules are on the device (frozen image or DIY/`just diy`). Low battery or a failed SoftAP bring-up falls back to normal boot; serial (`just shell`) shows `ap_session` / SoftAP messages if you have a cable.
 
 **Dashboard said Pairing reset / Forget FlipBuddy account after I USB-flashed.**  
-That toast is for a cube that still has an account in NVS. A full erase-flash already wiped it. Skip Forget. **Add Device** and pair again. Forget is USB face up, PIN unlock, then Forget FlipBuddy account, only when the cube is still claimed.
+That toast is for a cube that still has an account in NVS. A full erase-flash already wiped it. Skip Forget. **Add Device** and pair again. Forget is SoftAP cutout up, PIN unlock, then Forget FlipBuddy account, only when the cube is still claimed.
 
 **OTA wrote the file then `ESP_ERR_OTA_VALIDATE_FAILED`.**  
 The cube received a **merged USB** image (bootloader + table + app), not an app-slot package. Stay on the current slot. USB-flash `*-ota.bin` once, then let flipbuddy.app serve later updates. Stock MicroPython cannot self-flash. Do not put an app-slot file on GitHub Releases or `write-flash 0` it.
@@ -479,7 +478,7 @@ Not on a Super Mini if you can avoid it. Use the FlipBuddy frozen Release ([why]
 Those tags do not work with Production claim pairing or dual-OTA. USB-flash **`esp32_s3_flipbuddy_0.2.1-ota.bin`**, then `just fast-track` and Add Device. You cannot OTA from 0.1.5 onto 0.2.x.
 
 **I saved Wi‑Fi on SoftAP but the cube is still offline.**  
-On the phone, leave the **`FlipBuddy`** network and rejoin **home** Wi‑Fi. Flip the cube off the USB face (or tap **Reset device**). Confirm the SSID/password and, for hidden networks, the Hidden checkbox. Profile name defaults to `default` on the portal (getting‑started examples often use `home`) — either is fine; the firmware tries configured profiles.
+On the phone, leave the **`FlipBuddy`** network and rejoin **home** Wi‑Fi. Flip the cube off the SoftAP cutout (or tap **Reset device**). Confirm the SSID/password and, for hidden networks, the Hidden checkbox. Profile name defaults to `default` on the portal (getting‑started examples often use `home`) - either is fine; the firmware tries configured profiles.
 
 **Recorded times are wrong, or the clock looks fully out of sync.**  
 1. Home Wi‑Fi must work first (or fix it via SoftAP). SoftAP top bar cannot prove NTP until the cube has joined home Wi‑Fi on a normal boot.  

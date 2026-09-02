@@ -366,6 +366,7 @@ async def _finish_claim(result):
     parsed = parse_claim_response(raw)
     if not parsed:
         print("pairing: claim failed")
+        print("pairing: url", url)
         return False
     store_credentials(parsed["device_id"], parsed["device_token"])
     if parsed.get("api_url"):
@@ -412,22 +413,27 @@ async def _portal(ap):
 
 def run():
     """Entry from main.py for unclaimed cubes with ap_psk. SoftAP fail returns."""
-    ap = None
-    try:
-        ap = _bringup()
-    except OSError as e:
-        print("pairing: SoftAP failed:", e)
-        stop_softap()
-        return
-    try:
-        import uasyncio as asyncio
+    import uasyncio as asyncio
+    from network_helper import prepare_for_softap
 
-        ok = asyncio.run(_portal(ap))
-    except Exception as e:
-        print("pairing: portal error:", e)
-        stop_softap()
-        gc.collect()
-        return
-    if not ok:
+    while True:
+        ap = None
+        try:
+            prepare_for_softap()
+            ap = _bringup()
+        except OSError as e:
+            print("pairing: SoftAP failed:", e)
+            stop_softap()
+            return
+        try:
+            ok = asyncio.run(_portal(ap))
+        except Exception as e:
+            print("pairing: portal error:", e)
+            stop_softap()
+            gc.collect()
+            return
+        if ok:
+            return
         print("pairing: retry after USB stay / new code")
         stop_softap()
+        gc.collect()

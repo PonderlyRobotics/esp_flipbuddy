@@ -13,7 +13,7 @@ References:
 - https://github.com/peterhinch/micropython-async/blob/master/v3/docs/TUTORIAL.md
 - https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html#sec5
 
-FlipBuddy SoftAP captive portal (USB face / AP mode):
+FlipBuddy SoftAP captive portal (SoftAP cutout / AP mode):
 
 - WPA2-PSK join password: FB + last 6 alnum of device_id (HTTP on the AP)
 - Status: time, battery, face map, activity records
@@ -473,7 +473,7 @@ class ApModeFSM(BaseFSM):
             store_wifi_profile(profile, ssid, password, hidden=hidden)
             self._touch_unlock()
             self._set_flash(
-                "Wi-Fi saved (ssid=%s). Flip off USB face (or Reset). "
+                "Wi-Fi saved (ssid=%s). Flip off SoftAP cutout (or Reset). "
                 "Rejoin home Wi-Fi on this phone." % ssid,
                 ok=True,
             )
