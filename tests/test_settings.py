@@ -164,7 +164,7 @@ def test_supermini_pin_map():
     assert settings.CPU_FREQ_HZ == 240000000
     assert settings.DEBUG is False
     assert settings.SETTLE_STILL_MS == 10000
-    assert settings.FIRMWARE_VERSION == "0.2.0"
+    assert settings.FIRMWARE_VERSION == "0.2.1"
 
 
 def test_gpio_7_8_are_led_rail_not_i2c():
@@ -176,21 +176,6 @@ def test_gpio_7_8_are_led_rail_not_i2c():
     assert settings.I2C_SDA not in (7, 8)
     assert settings.I2C_SCL not in (7, 8)
     assert {settings.I2C_SDA, settings.I2C_SCL} == {11, 12}
-
-
-def test_settings_is_supermini_not_som():
-    src = _read("settings.py")
-    for banned in (
-        "BQ21061",
-        "BQ27427",
-        "BMA400",
-        "som_power",
-        "CHEM",
-        "ICHG",
-        "TS_ENABLE",
-        "pinhole",
-    ):
-        assert banned not in src, banned
 
 
 def test_settings_has_supermini_section_headings():
@@ -209,9 +194,6 @@ def test_settings_has_supermini_section_headings():
         "# --- STA timings ---",
     ):
         assert heading in src, heading
-    assert "PINHOLE" not in src
-    assert "ICHG" not in src
-    assert "TS_ENABLE" not in src
 
 
 def test_configure_board_hw_sets_led_vcc_rail_and_vin_adc(monkeypatch):

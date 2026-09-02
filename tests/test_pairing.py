@@ -1,4 +1,4 @@
-"""Host tests for pairing helpers (v0.2.0)."""
+"""Host tests for pairing helpers (v0.2.1)."""
 
 import importlib.util
 import json
@@ -14,8 +14,8 @@ from rgb import set_all_pixels
 from settings import IDENTIFY_GREEN, OTA_APP_MAX
 
 
-def test_firmware_version_is_0_2_0():
-    assert pairing.FIRMWARE_VERSION == "0.2.0"
+def test_firmware_version():
+    assert pairing.FIRMWARE_VERSION == "0.2.1"
 
 
 def test_http_401_403_surface_as_auth_error():

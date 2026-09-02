@@ -1,4 +1,4 @@
-"""Unclaimed pairing captive portal (OSS v0.2.0).
+"""Unclaimed pairing captive portal (OSS v0.2.1).
 
 SSID scan + hidden SSID + house password + pairing code (XXXX-XXXX).
 HTTP :80 on WPA2 SoftAP. No PIN.

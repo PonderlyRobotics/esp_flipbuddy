@@ -55,7 +55,7 @@ After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same i
 | `just diy` | `upload` + PSK (full sources on stock MP; does **not** copy JSON) |
 | `just upload` | Copy firmware modules (`device_py`) to the device |
 | `just pull-nvs-state` | Dump config/tracker from NVS to local JSON |
-| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.0-ota.bin`) |
+| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.1-ota.bin`) |
 | `just shell` | Serial console |
 | `just test` | Host tests (`tests/` + `test_fsm.py` via pytest) |
 | `just check` / `just fix` / `just fmt` | Lint / format (ruff) |
@@ -126,12 +126,12 @@ Please do not commit real credentials, `.env` files, private keys, absolute home
 
 We keep Super Mini images out of git and put **USB** images on GitHub Releases with checksums.
 
-v0.2.0 ships two USB files:
+v0.2.1 ships two USB files:
 
 | Asset | Flash with `write-flash 0` |
 |-------|----------------------------|
-| `esp32_s3_flipbuddy_0.2.0-ota.bin` | Yes. Dual-OTA table. Prefer this. |
-| `esp32_s3_flipbuddy_0.2.0.bin` | Yes. Factory table (no self-OTA). |
+| `esp32_s3_flipbuddy_0.2.1-ota.bin` | Yes. Dual-OTA table. Prefer this. |
+| `esp32_s3_flipbuddy_0.2.1.bin` | Yes. Factory table (no self-OTA). |
 
 Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.app OTA. USB-flashing it is wrong (`ESP_ERR_OTA_VALIDATE_FAILED` if it later gets OTA'd as a merged dump; a raw app blob at offset 0 is not a bootable USB image).
 
@@ -143,12 +143,12 @@ Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.ap
 
    ```bash
    just release-assets
-   # or: just release-assets build/esp32_s3_flipbuddy_0.2.0-ota.bin v0.2.0
+   # or: just release-assets build/esp32_s3_flipbuddy_0.2.1-ota.bin v0.2.1
    ```
 
-4. Tag that commit (`mise run release-tag -- v0.2.0` or `git tag -a v0.2.0`) and push the tag when you mean to publish.
+4. Tag that commit (`mise run release-tag -- v0.2.1` or `git tag -a v0.2.1`) and push the tag when you mean to publish.
 
-5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.0.md](./docs/RELEASE_NOTES_v0.2.0.md).
+5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.1.md](./docs/RELEASE_NOTES_v0.2.1.md).
 
 6. If the README still names an old image, update it. **v0.1.x** tags do not work with Production claim pairing or dual-OTA.
 
@@ -157,8 +157,8 @@ Never `git add` the `.bin`. Partition CSV for the dual-OTA table: [partitions/pa
 To flash after download:
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.2.0-ota.bin.sha256
-just flash-firmware esp32_s3_flipbuddy_0.2.0-ota.bin
+sha256sum -c esp32_s3_flipbuddy_0.2.1-ota.bin.sha256
+just flash-firmware esp32_s3_flipbuddy_0.2.1-ota.bin
 ```
 
 ## Tests
@@ -179,6 +179,8 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 | Area | File |
 |------|------|
 | Orchestration / FSMs | `main.py` (early SoftAP gate at top; Boot / Active / Upload) |
+| Pin / product overlay (LittleFS, not frozen) | `settings.py` |
+| Unclaimed pairing | `pairing.py`, `pairing_portal.py` |
 | SoftAP session (clean heap) | `ap_session.py` |
 | SoftAP captive portal | `ap_mode.py` (PIN unlock, Wi-Fi UI, LED test) |
 | Faces, tracker, config | `models.py` |
@@ -191,7 +193,7 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 | SoftAP end-user steps / risks | [README SoftAP](./README.md#softap-maintenance-mode), [SECURITY SoftAP](./SECURITY.md#softap-captive-portal-http-pin-wi-fi) |
 | Host SoftAP / credential tests | `tests/` |
 
-SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes. (Private design notes may exist under `ADR/` locally; that directory is not published.)
+SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes.
 
 Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. USB face (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py`); for DIY full sources use `just diy` / `just upload`.
 

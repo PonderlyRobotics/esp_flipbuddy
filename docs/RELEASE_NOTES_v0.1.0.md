@@ -1,6 +1,6 @@
 # FlipBuddy v0.1.0
 
-> **Obsolete for new cubes.** Use **[v0.2.0](./RELEASE_NOTES_v0.2.0.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
+> **Obsolete for new cubes.** Use **[v0.2.1](./RELEASE_NOTES_v0.2.1.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
 
 This is the first public DIY release under Ponderly Robotics.
 

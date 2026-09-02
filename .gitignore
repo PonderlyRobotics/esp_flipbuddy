@@ -1,6 +1,7 @@
 # --- Local architecture / assessment notes (not for public tree) ---
 ADR/
 adr/
+.review-*.md
 
 # --- Machine-local mise overrides (git identity, tokens, SSH hints) ---
 mise.local.toml

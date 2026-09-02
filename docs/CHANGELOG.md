@@ -2,9 +2,19 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.2.1 (2026-09-02)
+
+LittleFS **`settings.py`** overlay on the Super Mini freeze. Same claim pairing + dual-OTA table as **0.2.0**. Flash **`esp32_s3_flipbuddy_0.2.1-ota.bin`**. See [RELEASE_NOTES_v0.2.1.md](./RELEASE_NOTES_v0.2.1.md).
+
+- Super Mini GPIO and product tunables live in `settings.py` on the filesystem (not frozen). `just fast-track` / `just put-main` copy `main.py` + `settings.py` + a host SoftAP password
+- Unclaimed pairing brings the LED rail up once in the portal (`configure_board_hw`); claimed boot does it before the NeoPixel strip
+- Host tests cover the overlay pin map and LittleFS vs freeze lists
+
+Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.1-ota.bin` (preferred USB), `esp32_s3_flipbuddy_0.2.1.bin` (factory table). App-slot OTA files stay on flipbuddy.app; they are not GitHub assets.
+
 ## 0.2.0 (2026-09-01)
 
-Firmware **0.2.0** frozen Super Mini image (`pairing.FIRMWARE_VERSION`). **Breaking** vs every **v0.1.x** tag. Flash **`esp32_s3_flipbuddy_0.2.0-ota.bin`**. Tags **v0.1.0**–**v0.1.5** do not work with Production claim pairing or dual-OTA; they stay on GitHub as history only. See [RELEASE_NOTES_v0.2.0.md](./RELEASE_NOTES_v0.2.0.md).
+Firmware **0.2.0** frozen Super Mini image (`pairing.FIRMWARE_VERSION`). **Breaking** vs every **v0.1.x** tag. Flash **`esp32_s3_flipbuddy_0.2.0-ota.bin`**. Tags **v0.1.0**–**v0.1.5** do not work with Production claim pairing or dual-OTA; they stay on GitHub as history only. See [RELEASE_NOTES_v0.2.0.md](./RELEASE_NOTES_v0.2.0.md). LittleFS at this tag: `main.py` + `ap_psk.json`. The pin overlay `settings.py` ships in **0.2.1**.
 
 Breaking:
 
@@ -26,7 +36,7 @@ Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.0-ota.bin` (preferred USB)
 
 ## 0.1.5 (2026-08-29)
 
-**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.0**.
+**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.1**.
 
 Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050 + ADC.
 
