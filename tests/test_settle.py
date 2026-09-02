@@ -1,6 +1,7 @@
 """Host tests: MPU live-settle uses g-units and injected face names."""
 
-from util import SETTLE_STABLE_SAMPLES, accel_delta, settle_step
+from settings import SETTLE_STABLE_SAMPLES
+from util import accel_delta, settle_step
 
 
 def _run(samples, needed=SETTLE_STABLE_SAMPLES, move_g=0.16):

@@ -9,20 +9,19 @@ import os
 
 import ujson
 from esp32 import NVS
+from settings import (
+    ALLOWED_API_HOSTS,
+    API_URL_FILE,
+    AP_PSK_ALPHABET,
+    AP_PSK_FILE,
+    AP_PSK_KEY,
+    AP_PSK_MIN_LEN,
+    KEY,
+    LAST_AP_KEY,
+    NVS_NS,
+)
 from util import suppress
 
-NVS_NS = "cred"
-KEY = "json"
-LAST_AP_KEY = "lastap"
-AP_PSK_KEY = "appsk"
-# Same alphabet as FlipBuddy pairing codes (no 0/O/1/I/L).
-AP_PSK_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
-AP_PSK_MIN_LEN = 8
-AP_PSK_LEN = 8
-ALLOWED_API_HOSTS = ("api.flipbuddy.app", "localhost", "127.0.0.1")
-AP_PSK_FILE = "ap_psk.json"
-API_URL_FILE = "api_url.txt"
-DEFAULT_API_URL = "https://api.flipbuddy.app/v1/api/"
 _nvs = None
 
 

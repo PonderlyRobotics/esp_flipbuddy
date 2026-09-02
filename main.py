@@ -3,7 +3,6 @@
 # RTC marks: FBAP1 = run SoftAP on this boot; APDON = already tried this USB face.
 _AP_BOOT_MARK = b"FBAP1"
 _AP_DONE_MARK = b"APDON"
-SOFTAP_CAPTIVE_PORTAL_ENABLED = True
 
 
 def _early_softap_gate():
@@ -73,7 +72,6 @@ import uasyncio as asyncio
 import utime as time
 from credentials import load_ap_psk, load_credentials, print_missing_ap_psk_repl
 from machine import (
-    ADC,
     DEEPSLEEP_RESET,
     PIN_WAKE,
     RTC,
@@ -85,7 +83,6 @@ from machine import (
     reset_cause,
     wake_reason,
 )
-from micropython import const
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
 from mpu6050 import cube_face_upward, sample_face_accel, sensor_init
 from network_helper import (
@@ -96,10 +93,34 @@ from network_helper import (
 )
 import network_helper
 from ntptime import settime as ntp_settime
-from rgb import IDENTIFY_GREEN, set_all_pixels
-from util import (
+from rgb import set_all_pixels
+from settings import (
+    CPU_FREQ_HZ,
+    DEBUG,
+    DEFAULT_BAT_CAPACITY,
+    DEFAULT_INDICATOR_BLINK_CYCLE,
+    DEFAULT_INDICATOR_BLINK_DURATION,
+    DEFAULT_SLEEP_TIME,
+    DEFAULT_UPLOAD_FRQ,
+    FACES,
+    I2C_SCL,
+    I2C_SDA,
+    IDENTIFY_GREEN,
+    MAX_SLEEP_TIME,
+    MPU_INT_PIN,
+    NP_DATA_PIN,
+    NUM_LEDS,
+    OTA_APP_MAX,
+    OTA_HOLD_COLOR,
     SETTLE_HZ,
+    SETTLE_STILL_MS,
     SETTLE_TIMEOUT_S,
+    SOFTAP_CAPTIVE_PORTAL_ENABLED,
+    TIMER_NUM,
+    USB_VOLTAGE_THRESHOLD,
+    configure_board_hw,
+)
+from util import (
     read_battery_voltage,
     rgb_self_test,
     settle_step,
@@ -108,47 +129,8 @@ from util import (
     time_iso,
 )
 
-# Dual-OTA Super Mini app slot brake (0x1C0000 minus 64K). Merged USB images are larger.
-OTA_APP_MAX = 1769472
-OTA_HOLD_COLOR = "#FFFFFF"
-
 # 240Mhz Note: Going lower cause led flicker due to software based async execution
-freq(240000000)
-
-DEFAULT_BAT_CAPACITY = const(550)
-DEFAULT_SLEEP_TIME = const(18)  # seconds
-DEFAULT_UPLOAD_FRQ = const(300)  # seconds
-DEFAULT_OTA = const(7)  # days
-DEFAULT_INDICATOR_BLINK_DURATION = const(7000)  # ms
-DEFAULT_INDICATOR_BLINK_CYCLE = const(1)
-SETTLE_STILL_MS = const(10000)  # wall-clock still-hold after landing on a face
-MAX_SLEEP_TIME = const(900)  # seconds
-FACES = const(("front", "back", "left", "right", "top", "bottom"))
-
-# Hardware pins
-NP_VCC_PIN = const(7)
-NP_DATA_PIN = const(8)
-VIN_PIN = const(9)
-ONBOARD_LED = const(48)
-
-# NeoPixel
-NUM_LEDS = const(6)
-SDA_PIN = const(11)
-SCL_PIN = const(12)
-INTERRUPT_PIN = const(10)
-
-# Battery ADC settings
-BATTERY_FULL_V = const(4.2)
-BATTERY_CUTOFF_V = const(2.8)
-BATTERY_NOMINAL_V = const(3.7)
-
-USB_VOLTAGE_THRESHOLD = const(4.3)  # > this → USB power
-
-# General
-TIMER_NUM = const(1)
-# PIN_WAKE = 7  # micropython passed gpio wake reason directly when GPIO is used for wake not ext0/1
-
-DEBUG = False
+freq(CPU_FREQ_HZ)
 
 
 def dprint(*args, **kwargs):
@@ -165,7 +147,10 @@ def _read_mpu_settle(sensor):
 # ----------------------------------
 # -- Global objects & credentials --
 # ----------------------------------
-np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
+# Strip is built after configure_board_hw() (GPIO 7 rail before GPIO 8 data).
+np_obj = None
+np_vcc = None
+adc_vin = None
 
 device_cred = load_credentials()
 # Do NOT raise SystemExit here — on MicroPython that soft-reboots and loops.
@@ -538,9 +523,9 @@ async def prepare_for_deep_sleep(
                 calibrate=False,
                 mean=[0, 0, 0, 0, 0, 0],
                 stddev=[1, 1, 1, 1, 1, 1],
-                sda_pin=SDA_PIN,
-                scl_pin=SCL_PIN,
-                intruppt_pin=INTERRUPT_PIN,
+                sda_pin=I2C_SDA,
+                scl_pin=I2C_SCL,
+                intruppt_pin=MPU_INT_PIN,
             )
             esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
             if hasattr(s, "configure_for_deep_sleep"):
@@ -987,9 +972,9 @@ class BootFSM(BaseFSM):
 
         s = sensor_init(
             enable_mpu=True,
-            sda_pin=SDA_PIN,
-            scl_pin=SCL_PIN,
-            intruppt_pin=INTERRUPT_PIN,
+            sda_pin=I2C_SDA,
+            scl_pin=I2C_SCL,
+            intruppt_pin=MPU_INT_PIN,
             calibrate=should_calibrate,
             mean=mean,  # Pass existing data regardless
             stddev=stddev,
@@ -1306,9 +1291,9 @@ class ActiveFSM(BaseFSM):
             calibrate=False,
             mean=self.config.running["calibration"]["mean"],
             stddev=self.config.running["calibration"]["stddev"],
-            sda_pin=SDA_PIN,
-            scl_pin=SCL_PIN,
-            intruppt_pin=INTERRUPT_PIN,
+            sda_pin=I2C_SDA,
+            scl_pin=I2C_SCL,
+            intruppt_pin=MPU_INT_PIN,
         )
         self._mpu = s
         # Gyro IRQ also reads I2C; stop it so settle samples are not delayed.
@@ -1361,9 +1346,9 @@ class ActiveFSM(BaseFSM):
                 calibrate=False,
                 mean=self.config.running["calibration"]["mean"],
                 stddev=self.config.running["calibration"]["stddev"],
-                sda_pin=SDA_PIN,
-                scl_pin=SCL_PIN,
-                intruppt_pin=INTERRUPT_PIN,
+                sda_pin=I2C_SDA,
+                scl_pin=I2C_SCL,
+                intruppt_pin=MPU_INT_PIN,
             )
             self._mpu = s
         esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
@@ -1759,10 +1744,8 @@ if __name__ == "__main__":
         if load_ap_psk() is None:
             print_missing_ap_psk_repl()
         else:
-            from hw_config import configure_board_hw
             import pairing_portal
 
-            configure_board_hw()
             pairing_portal.run()
     else:
         scheduler_wd = Timer(TIMER_NUM)
@@ -1774,17 +1757,8 @@ if __name__ == "__main__":
         network_helper.wdt_tick = wdt_feed
 
         config = Config()
+        np_vcc, adc_vin = configure_board_hw()
+        np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
         tracker = Tracker(np_obj)
-
-        np_vcc = Pin(NP_VCC_PIN, Pin.OUT, Pin.PULL_DOWN, drive=Pin.DRIVE_2)  # 20mA max
-        np_vcc.off()  # ensure LEDs start with power gated off
-        try:  # noqa: SIM105
-            Pin(NP_DATA_PIN, Pin.OUT).value(
-                0
-            )  # prevent any data-line backfeed on start
-        except Exception:
-            pass
-        adc_vin = ADC(Pin(VIN_PIN), atten=ADC.ATTN_11DB)
-        adc_vin.width(ADC.WIDTH_12BIT)
 
         asyncio.run(main())

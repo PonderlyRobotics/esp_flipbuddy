@@ -3,7 +3,6 @@ import gc
 import uasyncio as asyncio
 import utime as time
 from credentials import load_credentials, load_last_ap, store_last_ap
-from micropython import const
 from network import (
     AP_IF,
     STA_IF,
@@ -13,14 +12,15 @@ from network import (
     WLAN,
     hostname,
 )
+from settings import (
+    ASYNC_POLL_MS,
+    DEFAULT_TIMEOUT_S,
+    FAIL_FAST_MS,
+    FAST_TIMEOUT_S,
+    SCAN_SETTLE_MS,
+    SYNC_POLL_MS,
+)
 from util import suppress
-
-SCAN_SETTLE_MS = const(250)
-FAIL_FAST_MS = const(250)
-SYNC_POLL_MS = const(50)
-ASYNC_POLL_MS = const(100)
-FAST_TIMEOUT_S = const(2)
-DEFAULT_TIMEOUT_S = const(5)
 
 # Last async_do_connect / do_connect outcome for callers (e.g. skip retries).
 # One of: "connected", "no_creds", "no_ssid", "failed", "already"

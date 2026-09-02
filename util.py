@@ -1,12 +1,7 @@
 from math import sqrt
 
 import utime as time
-
-SETTLE_HZ = 5
-SETTLE_STABLE_SAMPLES = 50  # 10 s still at 5 Hz (host settle_step)
-SETTLE_STILL_MS = 10000  # wall-clock still-hold before commit
-SETTLE_MOVE_G = 0.16  # Euclidean delta in g; motion restarts the dwell counter
-SETTLE_TIMEOUT_S = 40  # headroom for rotation before the 10 s hold
+from settings import SETTLE_MOVE_G, SETTLE_STABLE_SAMPLES
 
 
 def accel_delta(prev, new):

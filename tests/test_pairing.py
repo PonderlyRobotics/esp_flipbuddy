@@ -10,7 +10,8 @@ import credentials
 import pairing
 from http import HttpAuthError, http_result_for_status, is_http_auth_error
 from pairing_portal import PairingPortal, generate_pairing_html, parse_pair_form
-from rgb import IDENTIFY_GREEN, set_all_pixels
+from rgb import set_all_pixels
+from settings import IDENTIFY_GREEN, OTA_APP_MAX
 
 
 def test_firmware_version_is_0_2_0():
@@ -376,9 +377,9 @@ def test_ota_header_is_app_rejects_bootloader_and_merged():
     assert pairing.ota_header_is_app(b"\xff" * 16) is False
     assert pairing.ota_header_is_app(b"") is False
     assert pairing.ota_header_is_app(None) is False
-    assert pairing.OTA_APP_MAX == 1769472
-    assert 1817552 > pairing.OTA_APP_MAX
-    assert 1752016 < pairing.OTA_APP_MAX
+    assert OTA_APP_MAX == 1769472
+    assert 1817552 > OTA_APP_MAX
+    assert 1752016 < OTA_APP_MAX
 
 
 def test_host_ensure_reuses_existing_json(tmp_path, monkeypatch, capsys):

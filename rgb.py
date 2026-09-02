@@ -1,13 +1,14 @@
 import math
 
 import uasyncio as asyncio
+from settings import (
+    DEFAULT_INTENSITY_LEVEL,
+    ENABLE_SOFTAP_INDICATOR,
+    MAX_INTENSITY,
+    SOFTAP_LED_COLOR,
+    TRIAD_FACES,
+)
 from util import suppress
-
-CALIBRATION_RED = 1.0
-CALIBRATION_GREEN = 1.0
-CALIBRATION_BLUE = 1.0
-MAX_INTENSITY = 50
-DEFAULT_INTENSITY_LEVEL = 1
 
 pinout = {
     "front": {"led": 0, "type": "neopixel"},
@@ -17,15 +18,6 @@ pinout = {
     "top": {"led": 4, "type": "neopixel"},
     "right": {"led": 5, "type": "neopixel"},
 }
-
-# USB / stop-cutout indicator: three activity-face LEDs around the cutout.
-TRIAD_FACES = {
-    "front_cutout": ("right", "top", "front"),
-    "back_cutout": ("left", "back", "bottom"),
-}
-ENABLE_SOFTAP_INDICATOR = True
-SOFTAP_LED_COLOR = "#FFFF00"
-IDENTIFY_GREEN = "#00FF00"
 
 
 def _hex_to_np_rgb(hex_code, intensity_level=DEFAULT_INTENSITY_LEVEL):

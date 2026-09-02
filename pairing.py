@@ -7,16 +7,14 @@ from credentials import (
     load_credentials,
     missing_ap_psk_repl_lines,
 )
-
-PAIRING_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
-DEFAULT_API = "https://api.flipbuddy.app/v1/api/"
-IDENTIFY_GREEN = "#00FF00"
-FIRMWARE_VERSION = "0.2.0"
-OTA_ALLOWED_HOSTS = ("api.flipbuddy.app", "raw.githubusercontent.com")
-# Dual-OTA Super Mini slot is 0x1C0000. Same brake as justfile ota_app_max.
-OTA_APP_MAX = 1769472
-OTA_MIN_APP_SEGMENTS = 5
-ESP_IMAGE_MAGIC = 0xE9
+from settings import (
+    DEFAULT_API,
+    ESP_IMAGE_MAGIC,
+    FIRMWARE_VERSION,
+    OTA_ALLOWED_HOSTS,
+    OTA_MIN_APP_SEGMENTS,
+    PAIRING_ALPHABET,
+)
 
 
 def ota_header_is_app(head):

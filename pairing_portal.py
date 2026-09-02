@@ -9,8 +9,6 @@ import time
 
 import network
 from ap_mode import (
-    AP_IP,
-    AP_SUBNET,
     DNSQuery,
     PORTAL_CSS,
     _esc,
@@ -32,9 +30,9 @@ from pairing import (
     parse_claim_response,
     scan_table_rows,
 )
+from settings import AP_IP, AP_SUBNET, PAIR_DURATION_S
 from util import suppress
 
-PAIR_DURATION_S = 600
 HTTP_HINT = (
     "Stay on a desk you control. This page is HTTP after the WPA2 join."
 )
@@ -162,12 +160,13 @@ def parse_pair_form(form):
 
 
 def _led_hw():
-    """NeoPixel + VCC for unclaimed portal. Same pins as USB-face SoftAP."""
+    """NeoPixel + VCC for unclaimed portal. Same bring-up as USB-face SoftAP."""
     from machine import Pin
     import neopixel
-    from hw_config import NP_DATA_PIN, NP_VCC_PIN, NUM_LEDS
+    from settings import NP_DATA_PIN, NUM_LEDS, configure_board_hw
 
-    return neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS), Pin(NP_VCC_PIN, Pin.OUT)
+    np_vcc, _adc = configure_board_hw()
+    return neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS), np_vcc
 
 
 class PairingPortal:

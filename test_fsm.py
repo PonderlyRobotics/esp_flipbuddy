@@ -493,7 +493,7 @@ async def test_activefsm_settle_out_margin_does_not_error():
 
 
 async def test_activefsm_settle_timeout_skips_tracking_without_error():
-    from util import SETTLE_HZ
+    from settings import SETTLE_HZ
 
     cfg = make_fake_config()
     trk = make_fake_tracker()

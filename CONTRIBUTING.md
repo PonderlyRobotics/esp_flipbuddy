@@ -48,7 +48,7 @@ After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same i
 
 | Recipe | What it does |
 |--------|----------------|
-| `just put-main` | Upload `main.py` only |
+| `just put-main` | Upload `main.py` + `settings.py` |
 | `just gen-ap-psk` / `just put-ap-psk` | Host SoftAP join password (pairing) |
 | `just put-credentials` | Upload `credentials.json` (recovery; skips pairing SoftAP) |
 | `just fast-track` | `put-main` + PSK (frozen image path; does **not** copy JSON) |
@@ -193,9 +193,9 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 
 SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes. (Private design notes may exist under `ADR/` locally; that directory is not published.)
 
-Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. USB face (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). For small behavior changes on a frozen image, prefer `just put-main`; for DIY full sources use `just diy` / `just upload`.
+Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. USB face (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py`); for DIY full sources use `just diy` / `just upload`.
 
-Pins: search `main.py` for `NP_DATA_PIN` and the neighboring constants.
+Pins: search `settings.py` for `NP_DATA_PIN` and the neighboring constants.
 
 ## Custom frozen builds
 

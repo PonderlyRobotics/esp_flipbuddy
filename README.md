@@ -19,7 +19,7 @@ This repository is the open DIY build. Firmware **0.2.0** is the Super Mini free
   <img src="docs/media/hero-desk.png" alt="FlipBuddy cube with activity LED lit" width="220" />
 </p>
 
-If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assembly%20guide.pdf), the files in [stl/](./stl/), **`esp32_s3_flipbuddy_0.2.0-ota.bin`** from GitHub Releases, then `just fast-track` (`main.py` + a host SoftAP password). Pair from the cube Wi-Fi with an Add Device code. Dashboard JSON is recovery, not the first step. You can ignore `scripts/`, pre-commit, and the rest of the host tooling. People changing the code should read [CONTRIBUTING.md](./CONTRIBUTING.md).
+If you only want to build one, start with the [assembly PDF](./FlipBuddy%20Assembly%20guide.pdf), the files in [stl/](./stl/), **`esp32_s3_flipbuddy_0.2.0-ota.bin`** from GitHub Releases, then `just fast-track` (`main.py` + `settings.py` + a host SoftAP password). Pair from the cube Wi-Fi with an Add Device code. Dashboard JSON is recovery, not the first step. You can ignore `scripts/`, pre-commit, and the rest of the host tooling. People changing the code should read [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 | | |
 |--|--|
@@ -72,7 +72,7 @@ On an ESP32-S3 Super Mini, use the **FlipBuddy frozen image** from GitHub Releas
 |--|--|--|
 | Who it is for | Super Mini (4 MB) you want to use as a cube | Other chips, or you want every `.py` on the filesystem |
 | Flash | Release `esp32_s3_flipbuddy_*.bin` (prefer `*-ota.bin` when the tag has it) | GENERIC_S3 (or your chip) from micropython.org |
-| After flash | `just fast-track` (`main.py` + SoftAP password only) | `just diy` (all modules + SoftAP password) |
+| After flash | `just fast-track` (`main.py` + `settings.py` + SoftAP password) | `just diy` (all modules + SoftAP password) |
 | Pairing | Same cube Wi-Fi claim (Add Device code) | Same claim, slower bring-up |
 | Over-the-air | Dual-OTA image (`ota_0` / `ota_1`) can **self-write** an app-slot `.bin` from flipbuddy.app | **No** `ota_1` slot. Hash compare only. USB / `just diy` to apply |
 | Helpers | SoftAP, pairing, HTTP, NVS already frozen (fast, smaller FS) | Everything copied to LittleFS |
@@ -101,7 +101,7 @@ USB-C face up can open **SoftAP maintenance mode** (local captive portal). Uncla
 First-time setup is **claim pairing**, not a JSON download.
 
 1. Create a free account at [flipbuddy.app](https://flipbuddy.app). **Add Device**, pick the physical cube, give it a name. The wizard shows an 8-character code (`XXXX-XXXX` on screen).
-2. Flash the FlipBuddy frozen image, then `just fast-track` (or `just diy` on stock). That puts `main.py` and a random SoftAP password on the cube. Serial / the host print the password as `XXXX XXXX` (spaces are only for reading).
+2. Flash the FlipBuddy frozen image, then `just fast-track` (or `just diy` on stock). That puts `main.py`, `settings.py`, and a random SoftAP password on the cube. Serial / the host print the password as `XXXX XXXX` (spaces are only for reading).
 3. Keep **USB plugged in**. Join Wi-Fi **`FlipBuddy-XXXX`** (last 4 of the chip id, for example `FlipBuddy-323C`). Type the password **without** the space. While this pairing Wi-Fi is up, **all six LEDs stay solid yellow** (same `#FFFF00` as later USB-face SoftAP, which only lights the USB triad). If pairing fails and the cube comes back to the portal, yellow returns.
 4. Captive portal, or [http://10.20.30.40/](http://10.20.30.40/): house Wi-Fi plus the dashboard pairing code. House SSID/password stay on the cube. They are never posted to the API.
 5. Cube blinks **green**. In the app, confirm / **Start tracking**.
@@ -139,7 +139,7 @@ That is the main reason to prefer the FlipBuddy frozen OTA image: I can ship a t
 
 When the **USB‑C face** is up (the face with the USB‑C **port**; SoftAP is **on by default** in firmware, advanced builds can disable it), the cube soft‑resets into a short **SoftAP** session so you can check status and fix Wi‑Fi **without** `mpremote`.
 
-Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Release (**0.2.0**), **or** DIY/`just diy`. Fast track only pushes `main.py` + SoftAP password on top of the frozen set (`credentials.json` is recovery, not fast-track). Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
+Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Release (**0.2.0**), **or** DIY/`just diy`. Fast track only pushes `main.py` + `settings.py` + SoftAP password on top of the frozen set (`credentials.json` is recovery, not fast-track). Risks (WPA2 join password, cleartext HTTP after join, PIN): [SECURITY.md](./SECURITY.md).
 
 | | |
 |--|--|
@@ -246,7 +246,7 @@ Build and wire the cube first ([assembly section](#assembly-printing-and-parts) 
 
 | Path | Use when | What you put on the device |
 |------|----------|----------------------------|
-| [Fast track](#fast-track-v020) | ESP32-S3 Super Mini (preferred) | FlipBuddy `esp32_s3_flipbuddy_0.2.0-ota.bin`, then `main.py` + SoftAP password (`just fast-track`) |
+| [Fast track](#fast-track-v020) | ESP32-S3 Super Mini (preferred) | FlipBuddy `esp32_s3_flipbuddy_0.2.0-ota.bin`, then `main.py` + `settings.py` + SoftAP password (`just fast-track`) |
 | [DIY path](#diy-path) | Other boards, or every `.py` on the filesystem | Stock MicroPython + all sources + SoftAP password (`just diy`). No self-OTA. |
 
 ### Serial port and board (`justfile`)
@@ -273,7 +273,7 @@ The Release fast-track image is ESP32-S3 only. Other chips need the DIY path. Co
 
 ### Fast track (v0.2.0)
 
-Helpers (including SoftAP and pairing) are frozen into the image. You only place `main.py` and a host SoftAP password on the filesystem so you can tweak the entrypoint without rebuilding MicroPython. `credentials.json` is recovery (`just put-credentials`), not part of `just fast-track`. Prefer this over [stock MicroPython](#which-firmware-frozen-vs-stock). **v0.1.x** frozen images are not a supported path to current Production.
+Helpers (including SoftAP and pairing) are frozen into the image. You only place `main.py`, `settings.py`, and a host SoftAP password on the filesystem so you can tweak the entrypoint and pin overlay without rebuilding MicroPython. `credentials.json` is recovery (`just put-credentials`), not part of `just fast-track`. Prefer this over [stock MicroPython](#which-firmware-frozen-vs-stock). **v0.1.x** frozen images are not a supported path to current Production.
 
 | | |
 |--|--|
@@ -314,7 +314,7 @@ Erase-flash wipes NVS (token, house Wi-Fi, SoftAP password). Pair again after ev
 Follow [Pair from the cube Wi-Fi](#pair-from-the-cube-wi-fi). Short version:
 
 1. Create a free account at [flipbuddy.app](https://flipbuddy.app) and **Add Device** (physical cube) for the 8-character code.
-2. After flash, `just fast-track` uploads `main.py`, writes a random join password, then hard-resets the cube (`just gen-ap-psk` / `just put-ap-psk` if you want the steps split). **It does not copy `credentials.json`**, even if that file is sitting next to the justfile.
+2. After flash, `just fast-track` uploads `main.py` and `settings.py`, writes a random join password, then hard-resets the cube (`just gen-ap-psk` / `just put-ap-psk` if you want the steps split). **It does not copy `credentials.json`**, even if that file is sitting next to the justfile.
 3. Join `FlipBuddy-XXXX` with the printed password. On the cube page, pick home Wi-Fi and type the dashboard pairing code. Keep USB plugged in.
 4. JSON download from the device page is recovery only: `just put-credentials`. That skips pairing SoftAP.
 

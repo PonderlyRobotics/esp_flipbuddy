@@ -5,7 +5,7 @@
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
 #   2. just flash-firmware esp32_s3_flipbuddy_0.2.0-ota.bin
-#   3. just fast-track   # main.py + ap_psk, then hard reset (does NOT upload credentials.json)
+#   3. just fast-track   # main.py + settings.py + ap_psk, then hard reset (does NOT upload credentials.json)
 #   4. Join FlipBuddy-XXXX with the printed password.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
 # JSON recovery (advanced): just put-credentials
@@ -26,8 +26,8 @@ esp_chip := "s3"                             # esptool --chip esp32{{ esp_chip }
 esp_flash_size := "4MB"                      # document your module flash; shown by `just env`
 
 # Firmware modules for the ESP only (not host tools: test_fsm.py, clean_frozen.py, scripts/)
-device_py := "main.py hw_config.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
-# AST-stripped modules written by `just clean-frozen` (no main.py / hw_config.py — LittleFS overlay)
+device_py := "main.py settings.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
+# AST-stripped modules written by `just clean-frozen` (no main.py / settings.py — LittleFS overlay)
 cleaned_dir := "/tmp/flipbuddy_cleaned"
 cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py pairing.py pairing_portal.py"
 
@@ -97,11 +97,11 @@ reset-state:
     -mpremote connect {{ usb_dev }} rm :startup_config.json
     @echo "Runtime state files removed from device (ignore errors if missing)."
 
-# Upload main.py only (frozen image path — do not mass-upload other modules)
+# Upload main.py + settings.py (frozen image path — LittleFS overlay; do not mass-upload other modules)
 [group("Device")]
 put-main:
-    @mpremote connect {{ usb_dev }} cp main.py : >/dev/null
-    @echo "uploaded main.py"
+    @mpremote connect {{ usb_dev }} cp main.py settings.py : >/dev/null
+    @echo "uploaded main.py settings.py"
 
 # Print a random SoftAP join password (does not talk to the cube).
 # MicroPython will not invent ap_psk at boot. Write this down, then just put-ap-psk.
@@ -171,7 +171,7 @@ put-api-url api_url:
     echo "api $url"
 
 # Fast track FS deploy after flashing the frozen Release .bin.
-# main.py + hw_config.py + SoftAP join password. Does **not** upload credentials.json.
+# main.py + settings.py + SoftAP join password. Does **not** upload credentials.json.
 # Optional https API base: just fast-track https://host/v1/api/
 [group("Device")]
 fast-track api_url=env("FLIPBUDDY_API_URL", ""):
@@ -180,7 +180,7 @@ fast-track api_url=env("FLIPBUDDY_API_URL", ""):
     {{ wait_spin }}
     port="{{ usb_dev }}"
     echo "→ fast-track $port"
-    wait_spin mpremote connect "$port" cp main.py hw_config.py :
+    wait_spin mpremote connect "$port" cp main.py settings.py :
     python3 scripts/gen_ap_psk.py --ensure --quiet
     wait_spin mpremote connect "$port" cp ap_psk.json :
     if [[ -n "{{ api_url }}" ]]; then
@@ -240,7 +240,7 @@ flash-firmware firmware="esp32_s3_flipbuddy_0.2.0-ota.bin":
       exit 1
     fi
     echo "!!! This will ERASE the entire flash on {{ usb_dev }}"
-    echo "!!! NVS (token, wifi, ap_psk) is wiped. After flash: just gen-ap-psk && just put-ap-psk"
+    echo "!!! NVS (token, wifi, ap_psk) is wiped. After flash: just fast-track"
     echo "→ Flashing $fw ..."
     esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} erase-flash
     esptool --chip esp32{{ esp_chip }} --port {{ usb_dev }} --baud 460800 write-flash 0 "$fw"
@@ -284,8 +284,8 @@ upload-clean:
     done
     echo "   + main.py (repo source, not stripped)"
     mpremote connect {{ usb_dev }} cp main.py :
-    echo "   + hw_config.py (repo source, not stripped)"
-    mpremote connect {{ usb_dev }} cp hw_config.py :
+    echo "   + settings.py (repo source, not stripped)"
+    mpremote connect {{ usb_dev }} cp settings.py :
     echo "Upload complete. Reset the ESP32 to run the new code."
 
 # =============================================================================

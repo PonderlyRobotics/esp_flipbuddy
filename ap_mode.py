@@ -42,14 +42,15 @@ from models import BaseFSM, Transition
 from network_helper import start_softap
 import rgb
 from rgb import SOFTAP_LED_COLOR, set_cutout_triad_static
+from settings import (
+    AP_IP,
+    AP_SSID,
+    AP_SUBNET,
+    MAX_PIN_ATTEMPTS as _MAX_PIN_ATTEMPTS,
+    UNLOCK_IDLE_MS as _UNLOCK_IDLE_MS,
+    USB_VOLTAGE_THRESHOLD,
+)
 from util import read_battery_voltage, rgb_self_test, suppress
-
-AP_SSID = "FlipBuddy"
-AP_IP = "10.20.30.40"
-AP_SUBNET = "255.255.255.0"
-USB_VOLTAGE_THRESHOLD = 4.3
-_MAX_PIN_ATTEMPTS = 8
-_UNLOCK_IDLE_MS = 5 * 60 * 1000
 
 # Shared SoftAP captive-portal look (maintenance + pairing).
 PORTAL_CSS = (

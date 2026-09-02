@@ -12,12 +12,7 @@ still BootFSM / track. Success runs the portal, stops SoftAP, then deepsleeps.
 import gc
 import time
 
-
-AP_SSID = "FlipBuddy"
-AP_IP = "10.20.30.40"
-AP_SUBNET = "255.255.255.0"
-AP_DURATION_S = 300
-SLEEP_MS = 18000
+from settings import AP_DURATION_S, AP_IP, AP_SUBNET, SLEEP_MS
 
 
 def _bringup_softap():
@@ -55,15 +50,15 @@ def _bringup_softap():
 async def _portal(ap):
     """Load portal modules only after SoftAP is up."""
     import uasyncio as asyncio
-    from machine import ADC, Pin
+    from machine import Pin
 
     import neopixel
     from ap_mode import ApModeFSM
-    from hw_config import NP_DATA_PIN, NP_VCC_PIN, NUM_LEDS, VIN_PIN
     from models import Config, Tracker
+    from settings import NP_DATA_PIN, NUM_LEDS, configure_board_hw
 
+    np_vcc, adc_vin = configure_board_hw()
     np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
-    np_vcc = Pin(NP_VCC_PIN, Pin.OUT)
     from rgb import (
         ENABLE_SOFTAP_INDICATOR,
         SOFTAP_LED_COLOR,
@@ -75,11 +70,6 @@ async def _portal(ap):
         set_cutout_triad_static(np_obj, "back_cutout", SOFTAP_LED_COLOR)
     else:
         np_vcc.off()
-    adc_vin = ADC(Pin(VIN_PIN), atten=ADC.ATTN_11DB)
-    try:
-        adc_vin.width(ADC.WIDTH_12BIT)
-    except Exception:
-        pass
 
     config = Config()
     tracker = Tracker(np_obj)
