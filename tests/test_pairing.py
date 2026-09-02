@@ -4,11 +4,12 @@ import importlib.util
 import json
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import credentials
 import pairing
 from http import HttpAuthError, http_result_for_status, is_http_auth_error
-from pairing_portal import generate_pairing_html, parse_pair_form
+from pairing_portal import PairingPortal, generate_pairing_html, parse_pair_form
 from rgb import IDENTIFY_GREEN, set_all_pixels
 
 
@@ -408,3 +409,29 @@ def test_set_all_pixels_green():
     np = Fake()
     set_all_pixels(np, IDENTIFY_GREEN)
     assert all(p != (0, 0, 0) for p in np.data)
+
+
+def test_pairing_portal_show_leds_all_six_yellow_then_shutdown_cuts_vcc():
+    class Fake:
+        n = 6
+        data = [(0, 0, 0)] * 6
+
+        def __setitem__(self, i, v):
+            self.data[i] = v
+
+        def __getitem__(self, i):
+            return self.data[i]
+
+        def write(self):
+            pass
+
+    np = Fake()
+    vcc = MagicMock()
+    fsm = PairingPortal()
+    fsm.np_obj = np
+    fsm.np_vcc = vcc
+    fsm._show_leds()
+    vcc.on.assert_called()
+    assert all(p[0] > 0 and p[1] > 0 and p[2] == 0 for p in np.data)
+    fsm.shutdown()
+    vcc.off.assert_called()

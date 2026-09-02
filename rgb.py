@@ -85,6 +85,19 @@ def set_all_pixels(np_obj, hex_code):
     np_obj.write()
 
 
+def show_pairing_portal_leds(np_obj, np_vcc=None):
+    """All six LEDs solid yellow while unclaimed pairing SoftAP is up.
+
+    Same color as claimed USB-face SoftAP. No-op when ENABLE_SOFTAP_INDICATOR is False.
+    """
+    if not ENABLE_SOFTAP_INDICATOR:
+        return
+    if np_vcc is not None:
+        with suppress(Exception):
+            np_vcc.on()
+    set_all_pixels(np_obj, SOFTAP_LED_COLOR)
+
+
 # -----------------------------------
 # -- Base Class (Common Interface) --
 # -----------------------------------

@@ -16,6 +16,7 @@ Breaking:
 Also:
 
 - Frozen pairing portal (`pairing.py` / `pairing_portal.py`) in the image; fast track only places `main.py` + `ap_psk.json`
+- Unclaimed pairing SoftAP: all six LEDs solid yellow (`SOFTAP_LED_COLOR`); claimed USB-face SoftAP stays the yellow triad
 - Confirm-timeout 401/403 on GET config or sensor POST: clear NVS `pairing_identify` so USB-face SoftAP / PIN Forget works without erase-flash (token kept)
 - OTA: skip unless `settings.ota_enabled`; skip if `ota_address` is missing (do not claim success); HTTPS host allowlist only (`api.flipbuddy.app`, `raw.githubusercontent.com`); refuse merged USB / oversize / bootloader-header files; solid white LEDs during download; frozen pairing stack is not mip-updated
 - House Wi-Fi never copied from recovery JSON and never posted on claim

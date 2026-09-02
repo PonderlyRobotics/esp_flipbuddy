@@ -161,6 +161,14 @@ def parse_pair_form(form):
     return code, wifi
 
 
+def _led_hw():
+    """NeoPixel + VCC for unclaimed portal. Same pins as USB-face SoftAP."""
+    from machine import Pin
+    import neopixel
+
+    return neopixel.NeoPixel(Pin(8), 6), Pin(7, Pin.OUT)
+
+
 class PairingPortal:
     def __init__(self, existing_ap=None):
         self.existing_ap = existing_ap
@@ -169,6 +177,18 @@ class PairingPortal:
         self.ssids = []
         self.result = None  # {code} when the form is accepted; wifi is NVS-only
         self._done = False
+        self.np_obj = None
+        self.np_vcc = None
+
+    def _show_leds(self):
+        from rgb import show_pairing_portal_leds
+
+        try:
+            if self.np_obj is None:
+                self.np_obj, self.np_vcc = _led_hw()
+            show_pairing_portal_leds(self.np_obj, self.np_vcc)
+        except Exception as e:
+            print("pairing leds:", e)
 
     def refresh_scan(self):
         try:
@@ -202,6 +222,7 @@ class PairingPortal:
         from credentials import psk_log_hint
 
         print("SoftAP PSK %s" % psk_log_hint(get_ap_psk()))
+        self._show_leds()
         self.refresh_scan()
         server = await asyncio.start_server(self._http, "0.0.0.0", 80)
         asyncio.create_task(server.wait_closed())
@@ -212,6 +233,9 @@ class PairingPortal:
             with suppress(Exception):
                 self.ap.active(False)
             self.ap = None
+        if self.np_vcc is not None:
+            with suppress(Exception):
+                self.np_vcc.off()
         gc.collect()
 
     async def _dns(self):

@@ -74,3 +74,28 @@ def test_softap_indicator_disabled_is_noop():
         rgb.ENABLE_SOFTAP_INDICATOR = prev
     assert np.wrote is False
     assert np._data == [(0, 0, 0)] * 6
+
+
+def test_pairing_portal_leds_all_six_yellow():
+    np = _NP()
+    vcc = MagicMock()
+    rgb.show_pairing_portal_leds(np, vcc)
+    vcc.on.assert_called_once()
+    assert np.wrote is True
+    for i in range(6):
+        r, g, b = np[i]
+        assert r > 0 and g > 0 and b == 0
+
+
+def test_pairing_portal_leds_skipped_when_indicator_disabled():
+    np = _NP()
+    vcc = MagicMock()
+    prev = rgb.ENABLE_SOFTAP_INDICATOR
+    try:
+        rgb.ENABLE_SOFTAP_INDICATOR = False
+        rgb.show_pairing_portal_leds(np, vcc)
+    finally:
+        rgb.ENABLE_SOFTAP_INDICATOR = prev
+    vcc.on.assert_not_called()
+    assert np.wrote is False
+    assert np._data == [(0, 0, 0)] * 6

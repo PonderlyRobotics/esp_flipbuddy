@@ -12,6 +12,7 @@ This is **not** a drop-in file replace on a **v0.1.x** cube. Tags **v0.1.0** thr
 - **OTA safety:** after the dual-OTA USB flash, later updates come from **flipbuddy.app** (app-slot package). Merged USB dumps (`write-flash 0`) are refused if someone tries to OTA them (`ESP_ERR_OTA_VALIDATE_FAILED` / size / bootloader header). All six LEDs stay **solid white** while the download runs. The app-slot blob is **not** a GitHub Release asset (USB-flashing it bricks the boot path).
 - **House Wi-Fi stays on the cube.** The claim body never includes SSID/password. Recovery JSON is identity only.
 - **Still MicroPython 1.28**, MPU6050 + ADC Super Mini hardware, WPA2 SoftAP, last-AP reconnect, USB-face yellow SoftAP LEDs, live face preview.
+- **Pairing portal LEDs:** unclaimed cube Wi-Fi lights **all six** faces solid yellow. After claim, USB-face maintenance still uses the yellow triad; confirm still blinks green.
 
 ## Why not stock MicroPython
 
@@ -33,7 +34,7 @@ After a USB erase, skip **Forget FlipBuddy account**. The cube is already unclai
 
 ## Upgrade from v0.1.5
 
-1. Download the three `.bin` files and checksums from this Release. Verify:
+1. Download the two USB `.bin` files and checksums from this Release. Verify:
 
     ```bash
     sha256sum -c esp32_s3_flipbuddy_0.2.0-ota.bin.sha256
@@ -69,8 +70,8 @@ App-slot OTA packages are served by flipbuddy.app. They are **not** attached to 
 Expected SHA-256:
 
 ```
-69c256b2cb42f3c1552875f6cc0d8eafa96d471e949be3632a0c23e22f37d85c  esp32_s3_flipbuddy_0.2.0.bin
-3eff20212a506ce175798b05291fd1b3cf82801551361e01debee26d0e9ae3b8  esp32_s3_flipbuddy_0.2.0-ota.bin
+c435d9dc351eb517a9c3d4ee7d7ef0319dd72ebdf9a447f27451e5158664588a  esp32_s3_flipbuddy_0.2.0.bin
+4106bdc3eeafc760db0fee42f84ba1ac3deddf56cb374a6c9db5243da7ec9623  esp32_s3_flipbuddy_0.2.0-ota.bin
 ```
 
 ```bash

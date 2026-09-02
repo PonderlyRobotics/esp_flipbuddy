@@ -102,7 +102,7 @@ First-time setup is **claim pairing**, not a JSON download.
 
 1. Create a free account at [flipbuddy.app](https://flipbuddy.app). **Add Device**, pick the physical cube, give it a name. The wizard shows an 8-character code (`XXXX-XXXX` on screen).
 2. Flash the FlipBuddy frozen image, then `just fast-track` (or `just diy` on stock). That puts `main.py` and a random SoftAP password on the cube. Serial / the host print the password as `XXXX XXXX` (spaces are only for reading).
-3. Keep **USB plugged in**. Join Wi-Fi **`FlipBuddy-XXXX`** (last 4 of the chip id, for example `FlipBuddy-323C`). Type the password **without** the space.
+3. Keep **USB plugged in**. Join Wi-Fi **`FlipBuddy-XXXX`** (last 4 of the chip id, for example `FlipBuddy-323C`). Type the password **without** the space. While this pairing Wi-Fi is up, **all six LEDs stay solid yellow** (same `#FFFF00` as later USB-face SoftAP, which only lights the USB triad). If pairing fails and the cube comes back to the portal, yellow returns.
 4. Captive portal, or [http://10.20.30.40/](http://10.20.30.40/): house Wi-Fi plus the dashboard pairing code. House SSID/password stay on the cube. They are never posted to the API.
 5. Cube blinks **green**. In the app, confirm / **Start tracking**.
 
@@ -148,7 +148,7 @@ Full SoftAP needs the portal modules on the device: a FlipBuddy **frozen** Relea
 | Portal URL | [http://10.20.30.40/](http://10.20.30.40/) (captive portal usually opens this) |
 | Session length | About **5 minutes**, then SoftAP stops and the cube deep-sleeps |
 | Transport | **HTTP** on the encrypted radio (no TLS server) |
-| SoftAP LEDs | Solid **yellow** (`#FFFF00`) on the USB-face triad for the whole ~5 min session (see [LEDs](#leds-after-you-wake-the-cube)) |
+| SoftAP LEDs | Claimed USB-face: solid **yellow** triad. Unclaimed pairing: all six LEDs yellow (see [LEDs](#leds-after-you-wake-the-cube)) |
 
 ### Builder steps
 
@@ -218,7 +218,7 @@ Quiet **timer** wakes (the cube already sitting on a face) skip the map and prev
 
 ### SoftAP USB-face LEDs
 
-When the **USB‑C port face** is up and SoftAP is running, the cube does **not** use activity colors for that session. It lights the **USB-cutout triad** solid **yellow** (`#FFFF00` — `SOFTAP_LED_COLOR` in `rgb.py`) for the whole ~5 minute portal:
+When the **USB‑C port face** is up and **claimed** SoftAP is running, the cube does **not** use activity colors for that session. It lights the **USB-cutout triad** solid **yellow** (`#FFFF00`, `SOFTAP_LED_COLOR` in `rgb.py`) for the whole ~5 minute portal. Unclaimed pairing SoftAP uses the same yellow on **all six** LEDs:
 
 | Orientation | LEDs (activity-face names) | DIN index |
 |-------------|----------------------------|-----------|
