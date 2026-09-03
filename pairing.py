@@ -7,8 +7,11 @@ from credentials import (
     load_credentials,
     missing_ap_psk_repl_lines,
 )
+import time
+
 from settings import (
     DEFAULT_API,
+    DEFAULT_OTA,
     ESP_IMAGE_MAGIC,
     FIRMWARE_VERSION,
     OTA_ALLOWED_HOSTS,
@@ -138,7 +141,7 @@ def pairing_stack_frozen():
     return True
 
 
-def ota_settings_blob(config=None, tracker=None):
+def ota_settings_blob(config=None, tracker=None, remote=None):
     """GET settings, preferring live config over tracker raw_config."""
     blob = {}
     if tracker is not None:
@@ -156,16 +159,53 @@ def ota_settings_blob(config=None, tracker=None):
                 blob.update(settings)
         except Exception:
             pass
+    if isinstance(remote, dict):
+        try:
+            settings = remote.get("settings") or {}
+            if isinstance(settings, dict):
+                blob.update(settings)
+        except Exception:
+            pass
     return blob
 
 
-def ota_should_install(tracker_obj, config=None):
-    """Return (ota_url, None) or (None, skip_reason). Prefers settings.ota_address."""
-    if pairing_identify_on(config):
-        return None, "pairing_identify"
-    if not ota_settings_enabled(config=config, tracker=tracker_obj):
-        return None, "ota_enabled is false"
-    blob = ota_settings_blob(config=config, tracker=tracker_obj)
+def ota_interval_days(config=None, tracker=None, remote=None):
+    """Days between OTA checks."""
+    blob = ota_settings_blob(config=config, tracker=tracker, remote=remote)
+    try:
+        days = int(blob.get("ota_frequency"))
+    except (TypeError, ValueError):
+        days = int(DEFAULT_OTA)
+    if days < 1:
+        days = int(DEFAULT_OTA)
+    if days > 365:
+        days = 365
+    return days
+
+
+def ota_interval_skip(tracker_obj, config=None, remote=None, now=None):
+    """Skip reason if an OTA check should not run yet, else None."""
+    if now is None:
+        now = time.time()
+    try:
+        now = float(now)
+    except (TypeError, ValueError):
+        now = 0.0
+    if now < 1_000_000_000:
+        return "ota clock not set"
+    try:
+        last = float((tracker_obj.running or {}).get("last_ota_check") or 0)
+    except (TypeError, ValueError):
+        last = 0.0
+    days = ota_interval_days(config=config, tracker=tracker_obj, remote=remote)
+    if last <= 0:
+        return "ota interval arm"
+    if now - last < days * 86400:
+        return "ota interval not due"
+    return None
+
+
+def _ota_url_or_skip(blob, tracker_obj):
     addr = blob.get("ota_address")
     if addr is None or str(addr).strip() == "":
         try:
@@ -177,6 +217,23 @@ def ota_should_install(tracker_obj, config=None):
     addr = str(addr).strip()
     if not ota_address_allowed(addr):
         return None, "address not allowlisted"
+    return addr, None
+
+
+def ota_should_install(tracker_obj, config=None, remote=None, now=None):
+    """Return (ota_url, None) or (None, skip_reason). Prefers settings.ota_address."""
+    if pairing_identify_on(config):
+        return None, "pairing_identify"
+    if not ota_settings_enabled(config=config, tracker=tracker_obj):
+        return None, "ota_enabled is false"
+    blob = ota_settings_blob(config=config, tracker=tracker_obj, remote=remote)
+    if blob.get("pairing_identify"):
+        return None, "pairing_identify"
+    if "ota_enabled" in blob and not blob.get("ota_enabled"):
+        return None, "ota_enabled is false"
+    addr, skip = _ota_url_or_skip(blob, tracker_obj)
+    if skip:
+        return None, skip
     ver = str(blob.get("ota_version") or "")
     try:
         applied = str((tracker_obj.running or {}).get("ota_applied_version") or "")
@@ -186,6 +243,9 @@ def ota_should_install(tracker_obj, config=None):
         return None, "already applied"
     if pairing_stack_frozen() and str(blob.get("ota_kind") or "") == "overlay":
         return None, "pairing stack frozen; USB reflash required"
+    wait = ota_interval_skip(tracker_obj, config=config, remote=remote, now=now)
+    if wait:
+        return None, wait
     return addr, None
 
 

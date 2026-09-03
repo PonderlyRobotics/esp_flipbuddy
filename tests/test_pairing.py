@@ -169,14 +169,81 @@ def test_ota_uses_settings_address():
             }
         }
     )
-    trk = types.SimpleNamespace(running={"ota_applied_version": ""})
-    addr, skip = pairing.ota_should_install(trk, cfg)
+    now = 1_800_000_000
+    trk = types.SimpleNamespace(
+        running={"ota_applied_version": "", "last_ota_check": now - 8 * 86400}
+    )
+    addr, skip = pairing.ota_should_install(trk, cfg, now=now)
     assert skip is None
     assert addr.endswith("/sensor/ota/")
     trk.running["ota_applied_version"] = "0.2.1"
-    addr, skip = pairing.ota_should_install(trk, cfg)
+    addr, skip = pairing.ota_should_install(trk, cfg, now=now)
     assert addr is None
     assert skip == "already applied"
+
+
+def test_ota_interval_skips_first_check_and_respects_days():
+    cfg = types.SimpleNamespace(
+        running={
+            "settings": {
+                "ota_enabled": True,
+                "ota_address": "https://api.flipbuddy.app/v2/api/sensor/ota/",
+                "ota_version": "0.2.1",
+            }
+        }
+    )
+    now = 1_800_000_000
+    fresh = types.SimpleNamespace(running={"ota_applied_version": ""})
+    addr, skip = pairing.ota_should_install(fresh, cfg, now=now)
+    assert addr is None
+    assert skip == "ota interval arm"
+    addr, skip = pairing.ota_should_install(fresh, cfg, now=0)
+    assert skip == "ota clock not set"
+    waiting = types.SimpleNamespace(
+        running={"ota_applied_version": "", "last_ota_check": now - 2 * 86400}
+    )
+    addr, skip = pairing.ota_should_install(waiting, cfg, now=now)
+    assert addr is None
+    assert skip == "ota interval not due"
+    due = types.SimpleNamespace(
+        running={"ota_applied_version": "", "last_ota_check": now - 8 * 86400}
+    )
+    addr, skip = pairing.ota_should_install(due, cfg, now=now)
+    assert skip is None
+    assert addr.endswith("/sensor/ota/")
+    cfg.running["settings"]["ota_frequency"] = 1
+    sooner = types.SimpleNamespace(
+        running={"ota_applied_version": "", "last_ota_check": now - 2 * 86400}
+    )
+    addr, skip = pairing.ota_should_install(sooner, cfg, now=now)
+    assert skip is None
+    assert pairing.ota_interval_days(cfg) == 1
+    cfg.running["settings"]["ota_frequency"] = 0
+    assert pairing.ota_interval_days(cfg) == 7
+
+
+def test_ota_weekly_check_only_from_upload_not_boot():
+    src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+    fetch = src.split("async def fetch_config", 1)[1].split("async def ", 1)[0]
+    assert "ota_weekly_check" not in fetch
+    assert src.count("await ota_weekly_check(") == 1
+    upload = src.split("async def do_upload", 1)[1].split("async def ", 1)[0]
+    assert "ota_weekly_check" in upload
+
+
+def test_main_does_not_import_pairing_at_module_level():
+    """Claimed PIN_WAKE must not compile/import pairing before the LED map."""
+    src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+    for i, line in enumerate(src.splitlines(), 1):
+        code = line.split("#", 1)[0].rstrip()
+        if not code or code.startswith((" ", "\t")):
+            continue
+        assert not code.startswith("from pairing import"), f"module-level pairing import:{i}:{code}"
+        assert code != "import pairing" and not code.startswith("import pairing,"), (
+            f"module-level pairing import:{i}:{code}"
+        )
+    assert "from pairing import ota_should_install" in src
+    assert "from pairing import pairing_identify_on" in src
 
 
 def test_normalize_pairing_code():

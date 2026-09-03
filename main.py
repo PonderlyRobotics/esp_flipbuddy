@@ -82,7 +82,6 @@ from machine import (
     wake_reason,
 )
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
-from pairing import pairing_identify_on
 from mpu6050 import cube_face_upward, sample_face_accel, sensor_init
 from network_helper import (
     async_do_connect,
@@ -803,28 +802,31 @@ async def _ota_stream_sha256(url, headers, timeout=120, part=None, part_size=0):
     return n, hx
 
 
-async def ota_weekly_check(tracker_obj, config=None, remote=None):
-    """main.py-only OTA. Frozen pairing/models are not used (fast-track FS is main.py)."""
-    settings = _ota_settings(remote, config)
-    if settings.get("pairing_identify") or pairing_identify_on(config):
-        print("OTA skipped: pairing_identify")
-        return False
-    if not settings.get("ota_enabled"):
-        print("OTA skipped: ota_enabled is false")
-        return False
-    addr = str(settings.get("ota_address") or "").strip()
-    if not _ota_addr_ok(addr):
-        print("OTA skipped: no ota_address")
-        return False
-    ver = str(settings.get("ota_version") or "")
+def _ota_stamp_check(tracker_obj):
     try:
-        applied = str((tracker_obj.running or {}).get("ota_applied_version") or "")
+        tracker_obj.running["last_ota_check"] = time.time()
+        tracker_obj.apply(tracker_obj.running)
+        tracker_obj.save()
     except Exception:
-        applied = ""
-    if ver and applied == ver:
-        print("OTA skipped: already applied")
+        pass
+
+
+async def ota_weekly_check(tracker_obj, config=None, remote=None):
+    """Fetch firmware when the OTA interval has elapsed."""
+    from pairing import ota_should_install
+
+    addr, skip = ota_should_install(tracker_obj, config, remote=remote)
+    if skip == "ota interval arm":
+        _ota_stamp_check(tracker_obj)
+        print("OTA skipped: ota interval arm")
         return False
+    if not addr:
+        print("OTA skipped:", skip or "no ota_address")
+        return False
+    _ota_stamp_check(tracker_obj)
     print("OTA fetching", addr)
+    settings = _ota_settings(remote, config)
+    ver = str(settings.get("ota_version") or "")
     try:
         scheduler_wd.deinit()
         scheduler_wd.init(period=60000, mode=Timer.PERIODIC, callback=wdt_chk)
@@ -1077,7 +1079,8 @@ class BootFSM(BaseFSM):
             if new_hash != old_hash:
                 self.config.apply(self.config.running)
                 self.config.save()
-            await ota_weekly_check(self.tracker, self.config, self.remote_config)
+            from pairing import pairing_identify_on
+
             if pairing_identify_on(self.config):
                 await pairing_identify_blink_once(self.np_obj, self.np_vcc)
 
@@ -1106,6 +1109,8 @@ class BootFSM(BaseFSM):
         await disconnect_wifi()
 
     async def enter_deep_sleep(self):
+        from pairing import pairing_identify_on
+
         if pairing_identify_on(self.config):
             dprint("BootFSM skip deep sleep (pairing identify)")
             return
@@ -1744,6 +1749,8 @@ async def main():
         boot = BootFSM(config, tracker, np_obj, adc_vin, np_vcc)
         await boot.run()
         # USB often cannot DEEPSLEEP_RESET. Confirm green must still run.
+        from pairing import pairing_identify_on
+
         if pairing_identify_on(config):
             active = ActiveFSM(config, tracker, np_obj, adc_vin, np_vcc)
             active_result = await active.run()
@@ -1779,9 +1786,11 @@ if __name__ == "__main__":
         # Keep soft WDT happy during multi-second WiFi connect / NTP / upload.
         network_helper.wdt_tick = wdt_feed
 
-        config = Config()
         np_vcc, adc_vin = configure_board_hw()
         np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
+        if reset_cause() == DEEPSLEEP_RESET and wake_reason() == PIN_WAKE:
+            np_vcc.on()
+        config = Config()
         tracker = Tracker(np_obj)
 
         asyncio.run(main())

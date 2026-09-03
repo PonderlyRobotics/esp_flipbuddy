@@ -8,6 +8,7 @@ LittleFS **`settings.py`** overlay on the Super Mini freeze. Same claim pairing 
 
 - Super Mini GPIO and product tunables live in `settings.py` on the filesystem (not frozen). `just fast-track` / `just put-main` copy `main.py` + `settings.py` + a host SoftAP password
 - Unclaimed pairing brings the LED rail up once in the portal (`configure_board_hw`); claimed boot does it before the NeoPixel strip
+- Claimed motion wake no longer imports pairing before the LED map; the rail comes up before `Config` / `Tracker`. Frozen `rgb.pinout` stays a local dict; LittleFS `settings.py` still patches it
 - Host tests cover the overlay pin map and LittleFS vs freeze lists
 - Super Mini LED chain (DIN 0..5): front, bottom, back, left, top, right. Gravity matches. `front_cutout` is the USB-C port and the stop face (top/front/right). `back_cutout` is the SoftAP corner; yellow triad stays left/back/bottom. Overlay patches frozen `rgb.pinout` / `mpu6050.face_from_tilt` so `just put-main` is enough on a 0.2.1 image
 

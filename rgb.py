@@ -4,12 +4,20 @@ import uasyncio as asyncio
 from settings import (
     DEFAULT_INTENSITY_LEVEL,
     ENABLE_SOFTAP_INDICATOR,
-    LED_PINOUT as pinout,
     MAX_INTENSITY,
     SOFTAP_LED_COLOR,
     TRIAD_FACES,
 )
 from util import suppress
+
+pinout = {
+    "front": {"led": 0, "type": "neopixel"},
+    "bottom": {"led": 1, "type": "neopixel"},
+    "back": {"led": 2, "type": "neopixel"},
+    "left": {"led": 3, "type": "neopixel"},
+    "top": {"led": 4, "type": "neopixel"},
+    "right": {"led": 5, "type": "neopixel"},
+}
 
 
 def _hex_to_np_rgb(hex_code, intensity_level=DEFAULT_INTENSITY_LEVEL):

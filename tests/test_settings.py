@@ -232,6 +232,7 @@ def test_apply_orientation_overlay_patches_frozen_pinout():
     import mpu6050
 
     assert mpu6050.face_from_tilt is settings.overlay_face_from_tilt
+    rgb.pinout = {name: dict(spec) for name, spec in settings.LED_PINOUT.items()}
 
 
 def test_gpio_7_8_are_led_rail_not_i2c():
@@ -350,6 +351,38 @@ def test_claimed_path_builds_strip_after_led_rail():
     tracker = src.rfind("Tracker(np_obj)")
     assert cfg != -1 and strip != -1 and tracker != -1
     assert cfg < strip < tracker
+
+
+def test_claimed_path_brings_up_led_rail_before_config():
+    """Motion wake should power the strip before NVS Config/Tracker work."""
+    src = _read("main.py")
+    _unclaimed, claimed = src.split('if __name__ == "__main__":', 1)[1].rsplit("else:", 1)
+    rail = claimed.find("configure_board_hw")
+    strip = claimed.find("neopixel.NeoPixel")
+    config = claimed.find("Config()")
+    tracker = claimed.find("Tracker(np_obj)")
+    rail_on = claimed.find("np_vcc.on()")
+    assert rail != -1 and strip != -1 and config != -1 and tracker != -1
+    assert rail < strip < config < tracker
+    assert "PIN_WAKE" in claimed
+    assert rail_on != -1 and strip < rail_on < config
+
+
+def test_rgb_pinout_is_local_dict_not_settings_alias():
+    """Frozen rgb must keep its own pinout so import does not alias LittleFS settings."""
+    src = _read("rgb.py")
+    assert "LED_PINOUT as pinout" not in src
+    assert _assigns(src, "pinout")
+    import importlib
+
+    import rgb
+    import settings
+
+    rgb = importlib.reload(rgb)
+    assert rgb.pinout is not settings.LED_PINOUT
+    assert rgb.pinout["front"]["led"] == settings.LED_PINOUT["front"]["led"]
+    assert rgb.pinout["bottom"]["led"] == settings.LED_PINOUT["bottom"]["led"]
+    assert rgb.pinout["back"]["led"] == settings.LED_PINOUT["back"]["led"]
 
 
 def test_pairing_led_hw_uses_configure_board_hw():
