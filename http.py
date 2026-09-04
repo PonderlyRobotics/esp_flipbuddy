@@ -2,6 +2,7 @@ import network
 import uasyncio as asyncio
 import ujson as json
 from credentials import load_credentials, store_credentials
+from settings import PREVIEW_HTTP_MS
 from util import suppress
 
 
@@ -35,6 +36,261 @@ def http_result_for_status(code, body):
 def _status_code_from_line(status_line):
     parts = (status_line or "").split()
     return parts[1] if len(parts) > 1 else ""
+
+
+def parse_https_url(url):
+    """Return (host, port, path) for https URLs, else None."""
+    raw = str(url or "")
+    if not raw.startswith("https://"):
+        return None
+    rest = raw[8:]
+    if "/" in rest:
+        host, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        host, path = rest, "/"
+    port = 443
+    if ":" in host:
+        host, port_s = host.split(":", 1)
+        try:
+            port = int(port_s)
+        except ValueError:
+            return None
+    if not host:
+        return None
+    return host, port, path
+
+
+def _sta_up():
+    try:
+        return bool(network.WLAN(network.STA_IF).isconnected())
+    except Exception:
+        return False
+
+
+def _extra_headers(headers, skip):
+    if not headers:
+        return ""
+    out = ""
+    skip_l = skip
+    for k, v in headers.items():
+        if str(k).lower() in skip_l:
+            continue
+        out += "%s: %s\r\n" % (k, v)
+    return out
+
+
+class HttpSession:
+    """One TLS socket per wake. HTTP/1.1 keep-alive, serial request/response."""
+
+    def __init__(self):
+        self.host = None
+        self.port = 443
+        self.reader = None
+        self.writer = None
+
+    def is_open(self):
+        return self.writer is not None
+
+    async def open(self, url, timeout=8):
+        parsed = parse_https_url(url)
+        if not parsed:
+            print("Refusing non-HTTPS API URL")
+            return False
+        if not _sta_up():
+            print("No network connection")
+            return False
+        host, port, _path = parsed
+        if self.writer is not None and self.host == host and self.port == port:
+            return True
+        await self.close()
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port, ssl=True, server_hostname=host),
+                timeout,
+            )
+        except Exception as e:
+            print("HttpSession open failed:", e)
+            return False
+        self.host = host
+        self.port = port
+        self.reader = reader
+        self.writer = writer
+        return True
+
+    async def close(self):
+        writer = self.writer
+        self.reader = None
+        self.writer = None
+        self.host = None
+        self.port = 443
+        if writer is None:
+            return
+        with suppress(Exception):
+            writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+
+    async def request(self, method, url, headers=None, data=None, timeout=8):
+        """Drain the full response before the next write. Returns body / HttpAuthError / None."""
+        if not _sta_up():
+            print("No network connection")
+            return None
+        parsed = parse_https_url(url)
+        if not parsed:
+            print("Refusing non-HTTPS API URL")
+            return None
+        host, port, path = parsed
+        if self.writer is None or self.host != host or self.port != port:
+            if not await self.open(url, timeout=timeout):
+                return None
+        body_bytes = b"" if data is None else json.dumps(data).encode("utf-8")
+        req = "%s %s HTTP/1.1\r\n" % (method, path)
+        req += "Host: %s\r\n" % host
+        req += "Connection: keep-alive\r\n"
+        req += "Content-Length: %d\r\n" % len(body_bytes)
+        if data is not None:
+            req += "Content-Type: application/json\r\n"
+        req += _extra_headers(
+            headers,
+            ("host", "connection", "content-length", "content-type"),
+        )
+        req += "\r\n"
+        try:
+            self.writer.write(req.encode("utf-8"))
+            await self.writer.drain()
+            if body_bytes:
+                chunk = 1024
+                for i in range(0, len(body_bytes), chunk):
+                    self.writer.write(body_bytes[i : i + chunk])
+                    await self.writer.drain()
+            code, body, conn_close = await self._read_response(timeout)
+        except Exception as e:
+            print("HttpSession request failed:", e)
+            await self.close()
+            return None
+        if conn_close:
+            await self.close()
+        if code is None:
+            return None
+        return http_result_for_status(str(code), body)
+
+    async def post_ff(self, url, data, headers=None, timeout_ms=None):
+        """Preview POST. Do not open a new TLS socket. Short timeout, then drop."""
+        if self.writer is None:
+            return None
+        if timeout_ms is None:
+            timeout_ms = PREVIEW_HTTP_MS
+        try:
+            ms = int(timeout_ms)
+        except (TypeError, ValueError):
+            ms = PREVIEW_HTTP_MS
+        if ms < 1:
+            ms = 1
+        coro = self.request(
+            "POST", url, headers=headers, data=data, timeout=max(ms / 1000.0, 0.05)
+        )
+        wait_ms = getattr(asyncio, "wait_for_ms", None)
+        try:
+            if wait_ms:
+                return await wait_ms(coro, ms)
+            return await asyncio.wait_for(coro, ms / 1000.0)
+        except asyncio.TimeoutError:
+            await self.close()
+            return None
+        except Exception as e:
+            print("HttpSession post_ff failed:", e)
+            await self.close()
+            return None
+
+    async def _read_response(self, timeout):
+        reader = self.reader
+        if reader is None:
+            return None, None, True
+        status = ""
+        content_length = -1
+        conn_close = False
+        chunked = False
+        while True:
+            line = await asyncio.wait_for(reader.readline(), timeout)
+            if not line or line == b"\r\n":
+                break
+            if not status:
+                status = line.decode()
+            low = line.lower()
+            if low.startswith(b"content-length:"):
+                with suppress(BaseException):
+                    content_length = int(line.split(b":", 1)[1].strip())
+            if low.startswith(b"connection:") and b"close" in low:
+                conn_close = True
+            if low.startswith(b"transfer-encoding:") and b"chunked" in low:
+                chunked = True
+        code_s = _status_code_from_line(status)
+        try:
+            code = int(code_s) if code_s else 0
+        except ValueError:
+            code = 0
+        body = b""
+        if chunked:
+            body = await self._read_chunked(timeout)
+            conn_close = True
+        elif content_length > 0:
+            body = await asyncio.wait_for(reader.readexactly(content_length), timeout)
+        elif content_length == 0:
+            body = b""
+        else:
+            with suppress(Exception):
+                rest = await asyncio.wait_for(reader.read(4096), timeout)
+                if rest:
+                    body += rest
+            conn_close = True
+        try:
+            text = body.decode("utf-8")
+        except Exception:
+            text = body.decode("utf-8", "replace") if body else ""
+        return code, text, conn_close
+
+    async def _read_chunked(self, timeout):
+        reader = self.reader
+        body = b""
+        while True:
+            size_line = await asyncio.wait_for(reader.readline(), timeout)
+            if not size_line:
+                break
+            size_s = size_line.strip().split(b";", 1)[0]
+            if not size_s:
+                continue
+            size = int(size_s, 16)
+            if size == 0:
+                with suppress(Exception):
+                    await asyncio.wait_for(reader.readline(), timeout)
+                break
+            body += await asyncio.wait_for(reader.readexactly(size), timeout)
+            with suppress(Exception):
+                await asyncio.wait_for(reader.readline(), timeout)
+        return body
+
+
+_cloud = None
+
+
+def cloud_session():
+    global _cloud
+    if _cloud is None:
+        _cloud = HttpSession()
+    return _cloud
+
+
+def reset_cloud_session():
+    global _cloud
+    _cloud = None
+
+
+async def close_cloud_session():
+    global _cloud
+    if _cloud is None:
+        return
+    await _cloud.close()
 
 
 async def async_http_post(url, data, headers=None, timeout=5):
@@ -185,7 +441,7 @@ async def async_http_post(url, data, headers=None, timeout=5):
         return None
 
 
-async def async_rotate_device_token(url):
+async def async_rotate_device_token(url, session=None):
     """Request a new token asynchronously if the current one has expired.
 
     Returns the new device_token string when the server issues one, else None.
@@ -202,7 +458,10 @@ async def async_rotate_device_token(url):
         "Content-Type": "application/json",
     }
 
-    response = await async_http_post(url, None, headers)  # No body for rotate
+    if session is not None:
+        response = await session.request("POST", url, headers=headers, data=None)
+    else:
+        response = await async_http_post(url, None, headers)  # No body for rotate
     if is_http_auth_error(response):
         return response
     if response:
@@ -216,7 +475,7 @@ async def async_rotate_device_token(url):
     return None
 
 
-async def async_post_request(url, data, extra_header=None, timeout=5):
+async def async_post_request(url, data, extra_header=None, timeout=5, session=None):
     """Make an async POST request to the specified URL with the given data."""
     headers = {
         "Content-Type": "application/json",
@@ -224,7 +483,12 @@ async def async_post_request(url, data, extra_header=None, timeout=5):
     if extra_header:
         headers.update(extra_header)
 
-    response = await async_http_post(url, data, headers, timeout)
+    if session is not None:
+        response = await session.request(
+            "POST", url, headers=headers, data=data, timeout=timeout
+        )
+    else:
+        response = await async_http_post(url, data, headers, timeout)
     if is_http_auth_error(response):
         print("Request failed (auth %s)" % response.status)
         return response
