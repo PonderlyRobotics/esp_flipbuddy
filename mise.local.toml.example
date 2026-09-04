@@ -20,7 +20,7 @@ GIT_COMMITTER_EMAIL = "YOUR_PONDERLY_NOREPLY@users.noreply.github.com"
 # FLIPBUDDY_API_URL = "https://api.flipbuddy.app/v1/api/"
 
 # Default USB image for mise run release-sha / just flash-firmware
-# FLIPBUDDY_RELEASE_BIN = "build/esp32_s3_flipbuddy_0.2.1-ota.bin"
+# FLIPBUDDY_RELEASE_BIN = "build/esp32_s3_flipbuddy_0.2.2-ota.bin"
 
 # Maintainer freeze tree (mise run sync-esp / build-esp). Not required for flashing.
 # FLIPBUDDY_ESP_TREE = "/path/to/esp_flipbuddy_freeze"

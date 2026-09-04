@@ -1,4 +1,4 @@
-"""Host tests for pairing helpers (v0.2.1)."""
+"""Host tests for pairing helpers (v0.2.2)."""
 
 import importlib.util
 import json
@@ -15,7 +15,7 @@ from settings import IDENTIFY_GREEN, OTA_APP_MAX
 
 
 def test_firmware_version():
-    assert pairing.FIRMWARE_VERSION == "0.2.1"
+    assert pairing.FIRMWARE_VERSION == "0.2.2"
 
 
 def test_claim_url_default_is_production_v1():

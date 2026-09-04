@@ -24,10 +24,15 @@ def is_http_auth_error(value):
 
 
 def http_result_for_status(code, body):
-    """Map HTTP status to body, HttpAuthError (401/403), or None."""
+    """Map HTTP status to body, HttpAuthError (401/403), or None.
+
+    204 (live_event) returns empty string so callers can tell success from failure.
+    """
     s = str(code or "")
     if s in ("200", "201"):
         return body
+    if s == "204":
+        return ""
     if s in ("401", "403"):
         return HttpAuthError(int(s))
     return None
@@ -176,8 +181,12 @@ class HttpSession:
         return http_result_for_status(str(code), body)
 
     async def post_ff(self, url, data, headers=None, timeout_ms=None):
-        """Preview POST. Do not open a new TLS socket. Short timeout, then drop."""
-        if self.writer is None:
+        """Preview POST on the warm socket. Write fully, then short read. Never reopen.
+
+        Do not wrap request() in wait_for: cancelling mid-drain drops the POST
+        before Cloudflare sees it (serial still printed success).
+        """
+        if self.writer is None or self.reader is None:
             return None
         if timeout_ms is None:
             timeout_ms = PREVIEW_HTTP_MS
@@ -187,21 +196,47 @@ class HttpSession:
             ms = PREVIEW_HTTP_MS
         if ms < 1:
             ms = 1
-        coro = self.request(
-            "POST", url, headers=headers, data=data, timeout=max(ms / 1000.0, 0.05)
+        timeout = max(ms / 1000.0, 0.05)
+        parsed = parse_https_url(url)
+        if not parsed:
+            print("Refusing non-HTTPS API URL")
+            return None
+        host, port, path = parsed
+        if self.host != host or self.port != port:
+            return None
+        body_bytes = b"" if data is None else json.dumps(data).encode("utf-8")
+        req = "POST %s HTTP/1.1\r\n" % path
+        req += "Host: %s\r\n" % host
+        req += "Connection: keep-alive\r\n"
+        req += "Content-Length: %d\r\n" % len(body_bytes)
+        req += "Content-Type: application/json\r\n"
+        req += _extra_headers(
+            headers,
+            ("host", "connection", "content-length", "content-type"),
         )
-        wait_ms = getattr(asyncio, "wait_for_ms", None)
+        req += "\r\n"
         try:
-            if wait_ms:
-                return await wait_ms(coro, ms)
-            return await asyncio.wait_for(coro, ms / 1000.0)
+            self.writer.write(req.encode("utf-8"))
+            await asyncio.wait_for(self.writer.drain(), timeout)
+            if body_bytes:
+                chunk = 1024
+                for i in range(0, len(body_bytes), chunk):
+                    self.writer.write(body_bytes[i : i + chunk])
+                    await asyncio.wait_for(self.writer.drain(), timeout)
+            code, body, conn_close = await self._read_response(timeout)
         except asyncio.TimeoutError:
+            print("preview POST timeout")
             await self.close()
             return None
         except Exception as e:
             print("HttpSession post_ff failed:", e)
             await self.close()
             return None
+        if conn_close:
+            await self.close()
+        if code is None:
+            return None
+        return http_result_for_status(str(code), body)
 
     async def _read_response(self, timeout):
         reader = self.reader
@@ -230,8 +265,18 @@ class HttpSession:
             code = int(code_s) if code_s else 0
         except ValueError:
             code = 0
+        # 204/205/304 have no body. Django live_event is 204 without Content-Length.
+        # Treating that as "unknown length" used to read until timeout and close.
+        no_body = code in (204, 205, 304)
         body = b""
-        if chunked:
+        if no_body:
+            if chunked:
+                body = await self._read_chunked(timeout)
+            elif content_length > 0:
+                body = await asyncio.wait_for(
+                    reader.readexactly(content_length), timeout
+                )
+        elif chunked:
             body = await self._read_chunked(timeout)
             conn_close = True
         elif content_length > 0:

@@ -24,7 +24,7 @@ UV_PROJECT_ENVIRONMENT = "{{ config_root }}/.venv"
 AMPY_PORT = "/dev/ttyACM0"
 
 # GitHub Release helpers (USB images only). Maintainer freeze/sync lives in
-# gitignored mise.local.toml (FLIPBUDDY_ESP_TREE). Default USB image: 0.2.1-ota.
+# gitignored mise.local.toml (FLIPBUDDY_ESP_TREE). Default USB image: 0.2.2-ota.
 
 [tasks.release-sha]
 description = "SHA-256 USB frozen images for GitHub Release (no *-ota-app.bin)"
@@ -32,13 +32,13 @@ dir = "{{ config_root }}"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-TAG="${2:-v0.2.1}"
+TAG="${2:-v0.2.2}"
 if [[ -n "${1:-}" ]]; then
   bins=("$1")
 else
   bins=(
-    "${FLIPBUDDY_RELEASE_BIN:-build/esp32_s3_flipbuddy_0.2.1-ota.bin}"
-    build/esp32_s3_flipbuddy_0.2.1.bin
+    "${FLIPBUDDY_RELEASE_BIN:-build/esp32_s3_flipbuddy_0.2.2-ota.bin}"
+    build/esp32_s3_flipbuddy_0.2.2.bin
   )
 fi
 uniq=()
@@ -61,7 +61,7 @@ dir = "{{ config_root }}"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-TAG="${1:-v0.2.1}"
+TAG="${1:-v0.2.2}"
 if git rev-parse "$TAG" >/dev/null 2>&1; then
   echo "error: tag already exists: $TAG"
   echo "  git show $TAG"

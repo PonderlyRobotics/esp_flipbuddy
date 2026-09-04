@@ -2,6 +2,18 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.2.2 (2026-09-04)
+
+Super Mini freeze on the same claim pairing + dual-OTA table as **0.2.1**. Flash **`esp32_s3_flipbuddy_0.2.2-ota.bin`**. See [RELEASE_NOTES_v0.2.2.md](./RELEASE_NOTES_v0.2.2.md). Fast-track on a 0.2.1 USB image is not enough (`http.py`, `rgb.py`, `pairing_portal.py`, `credentials.py` are frozen).
+
+- Pause tracking (`settings.active` false): rapid red on the upward face (triad on cutouts); no new session; motion wakes skip Wi-Fi; timer / USB / pending log still check config
+- Unclaimed pairing portal returns after timeout or failure; cube deep-sleeps until MPU INT (no RTC timer, no retry loop)
+- Dashboard live preview: NVS `live_ok_until` (epoch only, outside Config hash); pickup wake joins Wi-Fi during the 7 s map when the hint is fresh; watched Super Mini timer wakes still preview (STA+TLS in settle); `sensor/live_event` POSTs on face change; tracking-off skips that radio
+- HTTP/1.1 keep-alive `HttpSession` (one TLS socket per wake); preview POST writes fully then reads (2 s budget; 204 is empty success); OTA still close-after-use for large GET; LEDs dim during STA/TLS TX
+- Host tests: keep-alive session, live-ok NVS, tracking-off, Mode A radio vs timer wake, watched timer settle preview
+
+Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.2-ota.bin` (preferred USB), `esp32_s3_flipbuddy_0.2.2.bin` (factory table). App-slot OTA files stay on flipbuddy.app; they are not GitHub assets.
+
 ## 0.2.1 (2026-09-02)
 
 LittleFS **`settings.py`** overlay on the Super Mini freeze. Same claim pairing + dual-OTA table as **0.2.0**. Flash **`esp32_s3_flipbuddy_0.2.1-ota.bin`**. See [RELEASE_NOTES_v0.2.1.md](./RELEASE_NOTES_v0.2.1.md).
@@ -38,7 +50,7 @@ Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.0-ota.bin` (preferred USB)
 
 ## 0.1.5 (2026-08-29)
 
-**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.1**.
+**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.2**.
 
 Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050 + ADC.
 

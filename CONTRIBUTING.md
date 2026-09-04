@@ -55,7 +55,7 @@ After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same i
 | `just diy` | `upload` + PSK (full sources on stock MP; does **not** copy JSON) |
 | `just upload` | Copy firmware modules (`device_py`) to the device |
 | `just pull-nvs-state` | Dump config/tracker from NVS to local JSON |
-| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.1-ota.bin`) |
+| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.2-ota.bin`) |
 | `just shell` | Serial console |
 | `just test` | Host tests (`tests/` + `test_fsm.py` via pytest) |
 | `just check` / `just fix` / `just fmt` | Lint / format (ruff) |
@@ -92,6 +92,7 @@ After the first boot, credentials and runtime state live in NVS, not as ordinary
 | Data | Namespace | Key |
 |------|-----------|-----|
 | Credentials | `cred` | `json` |
+| Live-ok hint | `cred` | `liveok` (`{"u": epoch}` only) |
 | Config | `config` | `cfg` |
 | Tracker | `tracker` | `trk` |
 
@@ -126,12 +127,12 @@ Please do not commit real credentials, `.env` files, private keys, absolute home
 
 We keep Super Mini images out of git and put **USB** images on GitHub Releases with checksums.
 
-v0.2.1 ships two USB files:
+v0.2.2 ships two USB files:
 
 | Asset | Flash with `write-flash 0` |
 |-------|----------------------------|
-| `esp32_s3_flipbuddy_0.2.1-ota.bin` | Yes. Dual-OTA table. Prefer this. |
-| `esp32_s3_flipbuddy_0.2.1.bin` | Yes. Factory table (no self-OTA). |
+| `esp32_s3_flipbuddy_0.2.2-ota.bin` | Yes. Dual-OTA table. Prefer this. |
+| `esp32_s3_flipbuddy_0.2.2.bin` | Yes. Factory table (no self-OTA). |
 
 Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.app OTA. USB-flashing it is wrong (`ESP_ERR_OTA_VALIDATE_FAILED` if it later gets OTA'd as a merged dump; a raw app blob at offset 0 is not a bootable USB image).
 
@@ -143,12 +144,12 @@ Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.ap
 
    ```bash
    just release-assets
-   # or: just release-assets build/esp32_s3_flipbuddy_0.2.1-ota.bin v0.2.1
+   # or: just release-assets build/esp32_s3_flipbuddy_0.2.2-ota.bin v0.2.2
    ```
 
-4. Tag that commit (`mise run release-tag -- v0.2.1` or `git tag -a v0.2.1`) and push the tag when you mean to publish.
+4. Tag that commit (`mise run release-tag -- v0.2.2` or `git tag -a v0.2.2`) and push the tag when you mean to publish.
 
-5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.1.md](./docs/RELEASE_NOTES_v0.2.1.md).
+5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.2.md](./docs/RELEASE_NOTES_v0.2.2.md).
 
 6. If the README still names an old image, update it. **v0.1.x** tags do not work with Production claim pairing or dual-OTA.
 
@@ -157,8 +158,8 @@ Never `git add` the `.bin`. Partition CSV for the dual-OTA table: [partitions/pa
 To flash after download:
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.2.1-ota.bin.sha256
-just flash-firmware esp32_s3_flipbuddy_0.2.1-ota.bin
+sha256sum -c esp32_s3_flipbuddy_0.2.2-ota.bin.sha256
+just flash-firmware esp32_s3_flipbuddy_0.2.2-ota.bin
 ```
 
 ## Tests

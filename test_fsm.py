@@ -82,7 +82,9 @@ mock_machine.freq = MagicMock()
 
 mock_esp32 = MagicMock()
 mock_esp32.wake_on_ext0 = MagicMock()
+mock_esp32.wake_on_gpio = MagicMock()
 mock_esp32.WAKEUP_ANY_HIGH = 1
+mock_esp32.WAKEUP_ALL_LOW = 0
 mock_esp32.NVS = MagicMock
 
 mock_neopixel = MagicMock()
@@ -315,7 +317,7 @@ async def test_bootfsm_cold_boot_runs_to_deep_sleep():
 
 
 async def test_prepare_for_deep_sleep_zero_ms_is_indefinite():
-    """sleep_ms<=0 → deepsleep() with no RTC timer (MPU/ext0 wake only)."""
+    """sleep_ms<=0 → deepsleep() with no RTC timer (MPU GPIO wake only)."""
     with (
         patch("main.disconnect_wifi", new_callable=AsyncMock),
         patch("main.sensor_init", return_value=MagicMock(_int_pin=MagicMock())),
@@ -425,7 +427,7 @@ class _SettleClock:
 
 
 @contextmanager
-def _patch_settle_hw(wake=None, samples=None):
+def _patch_settle_hw(wake=None, samples=None, hint_fresh=True):
     """Patch ActiveFSM settle: wake reason, MPU sample helper, 5 Hz clock."""
     if wake is None:
         wake = main.PIN_WAKE
@@ -444,6 +446,7 @@ def _patch_settle_hw(wake=None, samples=None):
 
     with (
         patch("main.wake_reason", return_value=wake),
+        patch("main.hint_is_fresh", return_value=hint_fresh),
         patch("main.sensor_init", return_value=MagicMock()),
         patch("main._read_mpu_settle", side_effect=_next),
         patch("main.wdt_feed"),
@@ -460,12 +463,38 @@ async def test_activefsm_settle_timer_wake_is_single_sample():
     trk = make_fake_tracker()
     active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
     with (
-        _patch_settle_hw(wake=0, samples=[((0.0, 1.0, 0.0), "front")]),
+        _patch_settle_hw(
+            wake=0, samples=[((0.0, 1.0, 0.0), "front")], hint_fresh=False
+        ),
         patch("main.asyncio.sleep_ms", new_callable=AsyncMock, create=True) as sleep_ms,
     ):
         await active.settle_face()
     assert active.face_obj is trk.front
     sleep_ms.assert_not_called()
+
+
+async def test_activefsm_settle_timer_wake_previews_when_watched():
+    """S3 often TIMER-wakes; watched cubes still run the preview settle loop."""
+    from util import SETTLE_STABLE_SAMPLES
+
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    trk.front.activity_id = "act-sleep"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    n = SETTLE_STABLE_SAMPLES
+    samples = [((0.0, 1.0, 0.0), "front")] * n
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=True)
+    with (
+        _patch_settle_hw(wake=0, samples=samples, hint_fresh=True),
+        patch("main.sta_is_connected", return_value=True),
+        patch("main.cloud_session", return_value=sess),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+    ):
+        await active.settle_face()
+    connect.assert_not_called()
+    assert active.face_obj is trk.front
+    assert trk.front.led.status == "ACTIVE"
 
 
 async def test_activefsm_settle_commits_assigned_face_after_fifty_samples():
@@ -753,9 +782,13 @@ async def test_preview_switch_posts_once_per_face_change():
     orients = [c.args[1]["orientation"] for c in sess.post_ff.await_args_list]
     assert orients == ["front", "right"]
     assert sess.post_ff.await_args_list[0].args[0].endswith("sensor/live_event/")
+    for c in sess.post_ff.await_args_list:
+        assert "device_id" in c.args[1]
+        assert c.args[1]["type"] == "orientation_preview"
 
 
-async def test_preview_switch_does_not_call_async_do_connect():
+async def test_preview_switch_connects_when_sta_down_but_watched():
+    """S3 timer Mode A: no map warm, so preview may STA+TLS itself."""
     cfg = make_fake_config()
     trk = make_fake_tracker()
     _quiet_indicator_leds(trk)
@@ -763,19 +796,20 @@ async def test_preview_switch_does_not_call_async_do_connect():
     active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
     sess = MagicMock()
     sess.is_open = MagicMock(return_value=False)
-    sess.post_ff = AsyncMock()
-    sess.open = AsyncMock()
+    sess.post_ff = AsyncMock(return_value="")
+    sess.open = AsyncMock(return_value=True)
     with (
         patch("main.hint_is_fresh", return_value=True),
         patch("main.sta_is_connected", return_value=False),
         patch("main.cloud_session", return_value=sess),
-        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+        patch("main.async_do_connect", new_callable=AsyncMock, return_value=True) as connect,
     ):
         await active._preview_switch("front")
         await asyncio.sleep(0)
-    connect.assert_not_called()
-    sess.open.assert_not_called()
-    sess.post_ff.assert_not_called()
+        await asyncio.sleep(0)
+    connect.assert_awaited()
+    sess.open.assert_awaited()
+    sess.post_ff.assert_awaited()
 
 
 async def test_preview_post_is_fire_and_forget():
@@ -809,6 +843,31 @@ async def test_preview_post_is_fire_and_forget():
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+
+
+async def test_preview_post_reopens_closed_socket():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = "act-sleep"
+    trk.front.led_color = "#111111"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=False)
+    sess.open = AsyncMock(return_value=True)
+    sess.post_ff = AsyncMock(return_value="")
+    with (
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.sta_is_connected", return_value=True),
+        patch("main.cloud_session", return_value=sess),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+    ):
+        await active._preview_switch("front")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+    connect.assert_not_called()
+    sess.open.assert_awaited()
+    sess.post_ff.assert_awaited()
 
 
 async def test_unassigned_face_no_preview_post():
@@ -1276,6 +1335,13 @@ if __name__ == "__main__":
     )
     results.append(
         _run_test(
+            "test_activefsm_settle_timer_wake_previews_when_watched",
+            test_activefsm_settle_timer_wake_previews_when_watched,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
             "test_activefsm_settle_commits_assigned_face_after_fifty_samples",
             test_activefsm_settle_commits_assigned_face_after_fifty_samples,
             is_async=True,
@@ -1373,8 +1439,8 @@ if __name__ == "__main__":
     )
     results.append(
         _run_test(
-            "test_preview_switch_does_not_call_async_do_connect",
-            test_preview_switch_does_not_call_async_do_connect,
+            "test_preview_switch_connects_when_sta_down_but_watched",
+            test_preview_switch_connects_when_sta_down_but_watched,
             is_async=True,
         )
     )
@@ -1382,6 +1448,13 @@ if __name__ == "__main__":
         _run_test(
             "test_preview_post_is_fire_and_forget",
             test_preview_post_is_fire_and_forget,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_preview_post_reopens_closed_socket",
+            test_preview_post_reopens_closed_socket,
             is_async=True,
         )
     )

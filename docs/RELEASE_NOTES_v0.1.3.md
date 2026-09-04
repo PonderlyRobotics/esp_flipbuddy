@@ -1,6 +1,6 @@
 # FlipBuddy v0.1.3
 
-> **Obsolete for new cubes.** Use **[v0.2.1](./RELEASE_NOTES_v0.2.1.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
+> **Obsolete for new cubes.** Use **[v0.2.2](./RELEASE_NOTES_v0.2.2.md)**. v0.1.x does not work with Production claim pairing or dual-OTA.
 
 Firmware **0.1.3** release: cutout triad LED fix on top of the 0.1.2 face pinout remap.
 

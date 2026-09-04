@@ -231,6 +231,55 @@ def test_async_http_post_stays_http10_close(monkeypatch):
     assert writer.closed is True
 
 
+def _http_204():
+    """Django live_event success: 204, no Content-Length, keep-alive."""
+    return b"HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n"
+
+
+def test_post_ff_204_without_content_length_reuses_socket(monkeypatch):
+    _force_sta_up(monkeypatch)
+    writer = FakeWriter()
+    reader = FakeReader(_http_204() + _http_204())
+    sess = http_mod.HttpSession()
+    sess.reader = reader
+    sess.writer = writer
+    sess.host = "api.flipbuddy.app"
+    sess.port = 443
+    url = "https://api.flipbuddy.app/v1/api/sensor/live_event/"
+
+    async def run():
+        await sess.post_ff(url, {"type": "orientation_preview", "orientation": "front"})
+        still_after_first = sess.is_open()
+        await sess.post_ff(url, {"type": "orientation_preview", "orientation": "right"})
+        return still_after_first, sess.is_open(), writer.closed, writer.blob.count(b"POST ")
+
+    still_after_first, still, closed, posts = asyncio.run(run())
+    assert still_after_first is True
+    assert still is True
+    assert closed is False
+    assert posts == 2
+
+
+def test_post_ff_204_connection_close_drops_socket(monkeypatch):
+    _force_sta_up(monkeypatch)
+    writer = FakeWriter()
+    sess = http_mod.HttpSession()
+    sess.reader = FakeReader(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+    sess.writer = writer
+    sess.host = "api.flipbuddy.app"
+    sess.port = 443
+
+    async def run():
+        await sess.post_ff(
+            "https://api.flipbuddy.app/v1/api/sensor/live_event/",
+            {"type": "orientation_preview", "orientation": "right"},
+        )
+        return sess.is_open()
+
+    assert asyncio.run(run()) is False
+    assert writer.closed is True
+
+
 def test_cloud_session_singleton_reuses_instance():
     http_mod.reset_cloud_session()
     a = http_mod.cloud_session()

@@ -5,7 +5,7 @@ from micropython import const
 # --- Identity ---  Super Mini overlay; do not copy another board's pin numbers.
 HW_FAMILY = "supermini"
 CHIP = "s3"
-FIRMWARE_VERSION = "0.2.1"
+FIRMWARE_VERSION = "0.2.2"
 
 # --- CPU / debug ---
 CPU_FREQ_HZ = const(240000000)
@@ -33,7 +33,7 @@ DEFAULT_BAT_CAPACITY = const(550)
 DEFAULT_SLEEP_TIME = const(18)  # seconds
 DEFAULT_UPLOAD_FRQ = const(300)  # seconds
 DEFAULT_OTA = const(7)  # days
-DEFAULT_INDICATOR_BLINK_DURATION = const(7000)  # ms
+DEFAULT_INDICATOR_BLINK_DURATION = const(4000)  # ms
 DEFAULT_INDICATOR_BLINK_CYCLE = const(1)
 MAX_SLEEP_TIME = const(900)  # seconds
 FACES = const(("front", "back", "left", "right", "top", "bottom"))
@@ -113,7 +113,10 @@ SYNC_POLL_MS = const(50)
 ASYNC_POLL_MS = const(100)
 FAST_TIMEOUT_S = const(2)
 DEFAULT_TIMEOUT_S = const(5)
-PREVIEW_HTTP_MS = const(300)
+# Cold TLS + CF/Django 204 often exceeds 400ms on Super Mini; cancel-mid-write dropped POSTs.
+PREVIEW_HTTP_MS = const(2000)
+WARM_RADIO_LEFTOVER_MS = const(1000)
+LIVE_EVENT_MAX_PER_WAKE = const(30)
 
 
 def overlay_face_from_tilt(

@@ -123,7 +123,10 @@ from settings import (
     SETTLE_STILL_MS,
     SETTLE_TIMEOUT_S,
     SOFTAP_CAPTIVE_PORTAL_ENABLED,
+    LIVE_EVENT_MAX_PER_WAKE,
+    PREVIEW_HTTP_MS,
     TX_DIM_FACTOR,
+    WARM_RADIO_LEFTOVER_MS,
     SOFTAP_CUTOUT,
     TIMER_NUM,
     USB_CUTOUT,
@@ -638,7 +641,10 @@ async def prepare_for_deep_sleep(
                 scl_pin=I2C_SCL,
                 intruppt_pin=MPU_INT_PIN,
             )
-            esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
+            # S3: wake_on_gpio deep sleep raises. Prefer EXT0 when the port
+            # supports it; timer wake still runs Mode A while hint is fresh.
+            with suppress(Exception):
+                esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
             if hasattr(s, "configure_for_deep_sleep"):
                 s.configure_for_deep_sleep()
             else:
@@ -1259,6 +1265,8 @@ class ActiveFSM(BaseFSM):
         self.face_obj = None
         self._preview_face = None
         self._radio_task = None
+        self._preview_lock = asyncio.Lock()
+        self._preview_post_count = 0
         self._mpu = None
         self.sleep_ms = (
             self.config.running["settings"].get(
@@ -1401,15 +1409,20 @@ class ActiveFSM(BaseFSM):
                 face_name = cube_face_upward(s)
         await blink_tracking_off(self.np_obj, self.np_vcc, face=face_name)
 
-    def _should_warm_radio(self):
-        if wake_reason() != PIN_WAKE:
-            return False
+    def _should_live_preview(self):
+        """Dashboard watching + tracking on. S3 often only TIMER-wakes (no GPIO DS)."""
         if self.is_tracking_off():
             return False
         return hint_is_fresh()
 
+    def _should_warm_radio(self):
+        """Warm during the face map only on classic PIN_WAKE + live preview."""
+        if wake_reason() != PIN_WAKE:
+            return False
+        return self._should_live_preview()
+
     async def _warm_radio(self):
-        """STA + TLS and GET config during the 7s map. Never called from settle."""
+        """STA + TLS and GET config. Used from the map or settle when watched."""
         try:
             with suppress(Exception):
                 dim_strip(self.np_obj, TX_DIM_FACTOR)
@@ -1436,7 +1449,7 @@ class ActiveFSM(BaseFSM):
         ]
         ref_face = self.tracker.back_cutout
         if assigned_face:
-            indicator_fade_time = DEFAULT_INDICATOR_BLINK_DURATION  # 7 seconds
+            indicator_fade_time = DEFAULT_INDICATOR_BLINK_DURATION  # 4 seconds
             for face in assigned_face:
                 face.led.duration_ms = indicator_fade_time
                 face.led.cycles = DEFAULT_INDICATOR_BLINK_CYCLE
@@ -1457,8 +1470,9 @@ class ActiveFSM(BaseFSM):
         with suppress(asyncio.CancelledError):
             await ref_face.led.inactive()
         if radio_task is not None:
+            leftover = WARM_RADIO_LEFTOVER_MS / 1000.0
             try:
-                await asyncio.wait_for(radio_task, 0.5)
+                await asyncio.wait_for(radio_task, leftover)
             except asyncio.TimeoutError:
                 pass
             except Exception:
@@ -1474,39 +1488,74 @@ class ActiveFSM(BaseFSM):
             return
         if not hint_is_fresh():
             return
-        if not sta_is_connected():
+        if self._preview_post_count >= LIVE_EVENT_MAX_PER_WAKE:
             return
+        self._preview_post_count += 1
         try:
             asyncio.create_task(self._live_preview_post(face))
         except Exception:
             pass
 
+    async def _ensure_preview_socket(self):
+        """Map TLS if warm; else STA+TLS here (S3 timer Mode A has no 4s map)."""
+        sess = cloud_session()
+        if sess.is_open():
+            return True
+        task = self._radio_task
+        if task is not None:
+            try:
+                if not task.done():
+                    await asyncio.wait_for(task, 15.0)
+            except Exception:
+                pass
+            if sess.is_open():
+                return True
+        if not sta_is_connected():
+            if not await async_do_connect(timeout=10):
+                print("live_event: sta fail")
+                return False
+        ok = bool(await sess.open(API_BASE))
+        if not ok:
+            print("live_event: tls fail")
+        return ok
+
     async def _live_preview_post(self, face):
-        """Fire-and-forget live_event. Never async_do_connect."""
+        """Fire-and-forget live_event. May STA+TLS when timer Mode A had no map."""
         try:
-            sess = cloud_session()
-            if not sess.is_open():
-                return
             color = getattr(face, "led_color", None)
             if not color:
                 led = getattr(face, "led", None)
                 color = getattr(led, "hex_code", "") if led is not None else ""
             payload = {
+                "device_id": TOKEN,
                 "type": "orientation_preview",
                 "orientation": getattr(face, "orientation", ""),
-                "color": color or "",
             }
+            if color and len(str(color)) == 7 and str(color)[0] == "#":
+                payload["color"] = color
             aid = getattr(face, "activity_id", "") or ""
             if aid:
                 payload["activity_id"] = aid
             an = getattr(face, "activity_name", "") or ""
             if an:
                 payload["activity_name"] = an
-            await sess.post_ff(
-                API_BASE + "sensor/live_event/", payload, headers=HEADERS
-            )
+            async with self._preview_lock:
+                if not await self._ensure_preview_socket():
+                    print("live_event: no socket", payload.get("orientation"))
+                    return
+                result = await cloud_session().post_ff(
+                    API_BASE + "sensor/live_event/",
+                    payload,
+                    headers=HEADERS,
+                    timeout_ms=PREVIEW_HTTP_MS,
+                )
+                # 204 → ""; timeout/fail → None. Do not print bare orientation on fail.
+                if result is None:
+                    print("live_event fail:", payload.get("orientation"))
+                else:
+                    print("live_event ok:", payload.get("orientation"))
         except Exception as e:
-            dprint("live_event:", e)
+            print("live_event err:", e)
 
     async def _preview_switch(self, face_name):
         """Light one assigned activity RGB; previous off. No errors, no tracking."""
@@ -1533,10 +1582,10 @@ class ActiveFSM(BaseFSM):
             self._preview_face = None
 
     async def settle_face(self):
-        """After the 7s show: 5 Hz MPU preview, commit when a face holds 50 samples.
+        """5 Hz MPU preview while watched; commit after 10 s still.
 
-        Timer wakes skip the loop (one sample). PIN_WAKE does not error on
-        out_margin. Tracking / SoftAP / error LEDs wait until FACE_DETECT.
+        Unwatched wakes take one sample. Watched wakes (PIN or TIMER on S3)
+        run the preview loop. Tracking / SoftAP / error LEDs wait until FACE_DETECT.
         """
         self.np_vcc.on()
         s = sensor_init(
@@ -1552,10 +1601,19 @@ class ActiveFSM(BaseFSM):
         # Gyro IRQ also reads I2C; stop it so settle samples are not delayed.
         with suppress(Exception):
             s.irq_stop()
-        if wake_reason() != PIN_WAKE:
+        if not self._should_live_preview():
             _accel, face = _read_mpu_settle(s)
             self.face_obj = self._face_from_name(face)
             return
+
+        # Timer wake while watched: no 4s map. Kick starts STA+TLS if needed.
+        print(
+            "settle preview on",
+            "wake",
+            wake_reason(),
+            "hint",
+            hint_is_fresh(),
+        )
 
         prev_accel = None
         prev_face = None
@@ -1604,7 +1662,8 @@ class ActiveFSM(BaseFSM):
                 intruppt_pin=MPU_INT_PIN,
             )
             self._mpu = s
-        esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
+        with suppress(Exception):
+            esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
         await asyncio.sleep(0.1)
         if self.face_obj is None:
             face_name = cube_face_upward(s)

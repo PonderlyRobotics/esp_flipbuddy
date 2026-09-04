@@ -4,7 +4,7 @@
 #
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
-#   2. just flash-firmware esp32_s3_flipbuddy_0.2.1-ota.bin
+#   2. just flash-firmware esp32_s3_flipbuddy_0.2.2-ota.bin
 #   3. just fast-track   # main.py + settings.py + ap_psk, then hard reset (does NOT upload credentials.json)
 #   4. Join FlipBuddy-XXXX with the printed password.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
@@ -228,7 +228,7 @@ pull-nvs-state out=".":
 
 # Full erase + flash a firmware .bin (download frozen images from GitHub Releases first)
 [group("Device")]
-flash-firmware firmware="esp32_s3_flipbuddy_0.2.1-ota.bin":
+flash-firmware firmware="esp32_s3_flipbuddy_0.2.2-ota.bin":
     #!/usr/bin/env bash
     set -euo pipefail
     # USB images only: *-ota.bin (preferred) or factory .bin. Looks in cwd, then build/.
@@ -339,19 +339,19 @@ release-check:
     @echo "✓ release-check passed. Review any warnings above before publishing."
 
 # Hash USB frozen images for GitHub Releases (writes .sha256 + SHA256SUMS; does not upload).
-# Default: v0.2.1 factory + dual-OTA USB bins under build/. Does not hash app-slot OTA files.
+# Default: v0.2.2 factory + dual-OTA USB bins under build/. Does not hash app-slot OTA files.
 #   just release-assets
-#   just release-assets build/esp32_s3_flipbuddy_0.2.1-ota.bin v0.2.1
+#   just release-assets build/esp32_s3_flipbuddy_0.2.2-ota.bin v0.2.2
 [group("Utils")]
-release-assets firmware="" tag="v0.2.1":
+release-assets firmware="" tag="v0.2.2":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -n "{{ firmware }}" ]]; then
       bins=("{{ firmware }}")
     else
       bins=(
-        build/esp32_s3_flipbuddy_0.2.1.bin
-        build/esp32_s3_flipbuddy_0.2.1-ota.bin
+        build/esp32_s3_flipbuddy_0.2.2.bin
+        build/esp32_s3_flipbuddy_0.2.2-ota.bin
       )
     fi
     for f in "${bins[@]}"; do
@@ -380,9 +380,9 @@ release-assets firmware="" tag="v0.2.1":
 # Create GitHub Release + upload USB .bin files and checksums (requires: gh auth login).
 # USB images only (factory + *-ota.bin). App-slot OTA stays on flipbuddy.app.
 #   just release-publish
-#   just release-publish v0.2.1
+#   just release-publish v0.2.2
 [group("Utils")]
-release-publish tag="v0.2.1":
+release-publish tag="v0.2.2":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v gh >/dev/null || { echo "gh CLI not found. Install GitHub CLI and run: gh auth login"; exit 1; }

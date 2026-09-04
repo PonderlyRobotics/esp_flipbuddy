@@ -41,7 +41,7 @@ Everyday bugs, typos, and “please add this feature” belong in **public issue
 | Version | Support |
 |---------|---------|
 | **0.2.x** | Best effort (claim pairing + dual-OTA freeze) |
-| **0.1.x** (v0.1.0–v0.1.5) | Obsolete. Does not work with Production claim pairing or dual-OTA. USB-flash **0.2.1**. |
+| **0.1.x** (v0.1.0–v0.1.5) | Obsolete. Does not work with Production claim pairing or dual-OTA. USB-flash **0.2.2**. |
 | Older or untagged trees | No formal support |
 
 ## Credentials

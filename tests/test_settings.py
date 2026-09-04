@@ -99,6 +99,8 @@ _MOVED = (
     "FAST_TIMEOUT_S",
     "DEFAULT_TIMEOUT_S",
     "PREVIEW_HTTP_MS",
+    "WARM_RADIO_LEFTOVER_MS",
+    "LIVE_EVENT_MAX_PER_WAKE",
 )
 
 _MAIN_MUST_NOT_ASSIGN = (
@@ -170,7 +172,10 @@ def test_supermini_pin_map():
     assert settings.CPU_FREQ_HZ == 240000000
     assert settings.DEBUG is False
     assert settings.SETTLE_STILL_MS == 10000
-    assert settings.FIRMWARE_VERSION == "0.2.1"
+    assert settings.FIRMWARE_VERSION == "0.2.2"
+    assert settings.DEFAULT_INDICATOR_BLINK_DURATION == 4000
+    assert settings.LIVE_EVENT_MAX_PER_WAKE == 30
+    assert settings.PREVIEW_HTTP_MS == 2000
 
 
 def test_led_pinout_matches_physical_chain():
