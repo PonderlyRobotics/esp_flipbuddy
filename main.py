@@ -558,8 +558,12 @@ async def prepare_for_deep_sleep(
     except Exception as e:
         dprint("scheduler_wd.deinit() warning:", e)
 
-    dprint(f"→ Deep sleep {sleep_ms // 1000}s")
-    deepsleep(sleep_ms)
+    if sleep_ms <= 0:
+        dprint("→ Deep sleep until PIN_WAKE (no timer)")
+        deepsleep()
+    else:
+        dprint(f"→ Deep sleep {sleep_ms // 1000}s")
+        deepsleep(sleep_ms)
 
 
 def _ota_settings(remote, config):
@@ -1767,6 +1771,25 @@ async def main():
             await upload.run()
 
 
+async def _unclaimed_motion_deep_sleep():
+    """After pairing portal exits without a token: MPU6050 wake only, no RTC timer."""
+    global np_vcc, np_obj
+    print("pairing: portal ended (no token) — motion deep sleep")
+    try:
+        if np_vcc is None or np_obj is None:
+            np_vcc, _adc = configure_board_hw()
+            np_obj = neopixel.NeoPixel(Pin(NP_DATA_PIN), NUM_LEDS)
+    except Exception as e:
+        print("pairing: LED bring-up for sleep", e)
+    try:
+        stop_softap()
+        release_wifi_radios()
+    except Exception:
+        pass
+    # sleep_ms=0 → deepsleep() with no timeout; wake only on MPU INT (ext0).
+    await prepare_for_deep_sleep(np_vcc, np_obj, sleep_ms=0, do_mpu_config=True)
+
+
 if __name__ == "__main__":
     if not CREDENTIALS_OK:
         # Unclaimed: host must have provisioned ap_psk (just gen-ap-psk).
@@ -1777,6 +1800,8 @@ if __name__ == "__main__":
             import pairing_portal
 
             pairing_portal.run()
+            # Timed out / SoftAP fail / no claim: stay asleep until the cube moves.
+            asyncio.run(_unclaimed_motion_deep_sleep())
     else:
         scheduler_wd = Timer(TIMER_NUM)
         scheduler_wd.init(period=8000, mode=Timer.PERIODIC, callback=wdt_chk)

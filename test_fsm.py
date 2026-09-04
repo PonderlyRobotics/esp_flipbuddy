@@ -314,6 +314,32 @@ async def test_bootfsm_cold_boot_runs_to_deep_sleep():
             assert boot.is_connected is True
 
 
+async def test_prepare_for_deep_sleep_zero_ms_is_indefinite():
+    """sleep_ms<=0 → deepsleep() with no RTC timer (MPU/ext0 wake only)."""
+    with (
+        patch("main.disconnect_wifi", new_callable=AsyncMock),
+        patch("main.sensor_init", return_value=MagicMock(_int_pin=MagicMock())),
+        patch("main.esp32") as mock_esp32,
+        patch("main.deepsleep") as mock_deepsleep,
+        patch("main.Pin"),
+    ):
+        await main.prepare_for_deep_sleep(
+            MagicMock(), MagicMock(), sleep_ms=0, do_mpu_config=True
+        )
+    mock_esp32.wake_on_ext0.assert_called()
+    mock_deepsleep.assert_called_once_with()
+
+
+def test_unclaimed_main_uses_motion_deep_sleep_not_repl_loop():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.joinpath("main.py").read_text()
+    assert "_unclaimed_motion_deep_sleep" in src
+    assert "portal ended (no token) — motion deep sleep" in src
+    portal = Path(__file__).resolve().parent.joinpath("pairing_portal.py").read_text()
+    assert "while True:" not in portal.split("def run():", 1)[1]
+
+
 async def test_bootfsm_offline_when_wifi_fails():
     """No Wi‑Fi: skip NTP/cloud, keep offline defaults, deep sleep (no reset loop)."""
     with (
@@ -856,6 +882,19 @@ if __name__ == "__main__":
             "test_bootfsm_cold_boot_runs_to_deep_sleep",
             test_bootfsm_cold_boot_runs_to_deep_sleep,
             is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_prepare_for_deep_sleep_zero_ms_is_indefinite",
+            test_prepare_for_deep_sleep_zero_ms_is_indefinite,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_unclaimed_main_uses_motion_deep_sleep_not_repl_loop",
+            test_unclaimed_main_uses_motion_deep_sleep_not_repl_loop,
         )
     )
     results.append(

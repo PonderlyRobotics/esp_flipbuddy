@@ -412,28 +412,31 @@ async def _portal(ap):
 
 
 def run():
-    """Entry from main.py for unclaimed cubes with ap_psk. SoftAP fail returns."""
+    """Entry from main.py for unclaimed cubes with ap_psk.
+
+    SoftAP fail / portal error / duration timeout without a code returns so
+    main can enter motion-only deep sleep (no infinite retry loop).
+    """
     import uasyncio as asyncio
     from network_helper import prepare_for_softap
 
-    while True:
-        ap = None
-        try:
-            prepare_for_softap()
-            ap = _bringup()
-        except OSError as e:
-            print("pairing: SoftAP failed:", e)
-            stop_softap()
-            return
-        try:
-            ok = asyncio.run(_portal(ap))
-        except Exception as e:
-            print("pairing: portal error:", e)
-            stop_softap()
-            gc.collect()
-            return
-        if ok:
-            return
-        print("pairing: retry after USB stay / new code")
+    ap = None
+    try:
+        prepare_for_softap()
+        ap = _bringup()
+    except OSError as e:
+        print("pairing: SoftAP failed:", e)
+        stop_softap()
+        return
+    try:
+        ok = asyncio.run(_portal(ap))
+    except Exception as e:
+        print("pairing: portal error:", e)
         stop_softap()
         gc.collect()
+        return
+    if ok:
+        return
+    print("pairing: portal ended without claim")
+    stop_softap()
+    gc.collect()
