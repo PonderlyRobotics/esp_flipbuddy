@@ -69,6 +69,7 @@ _MOVED = (
     "CALIBRATION_BLUE",
     "MAX_INTENSITY",
     "DEFAULT_INTENSITY_LEVEL",
+    "TX_DIM_FACTOR",
     "LED_PINOUT",
     "TRIAD_FACES",
     "USB_CUTOUT",
@@ -82,6 +83,7 @@ _MOVED = (
     "NVS_NS",
     "KEY",
     "LAST_AP_KEY",
+    "LIVE_OK_KEY",
     "AP_PSK_KEY",
     "AP_PSK_ALPHABET",
     "AP_PSK_MIN_LEN",
@@ -96,6 +98,7 @@ _MOVED = (
     "ASYNC_POLL_MS",
     "FAST_TIMEOUT_S",
     "DEFAULT_TIMEOUT_S",
+    "PREVIEW_HTTP_MS",
 )
 
 _MAIN_MUST_NOT_ASSIGN = (
@@ -345,7 +348,13 @@ def test_unclaimed_path_brings_up_hw_before_pairing():
 def test_claimed_path_builds_strip_after_led_rail():
     src = _read("main.py")
     top = src.split('if __name__ == "__main__":', 1)[0]
-    assert "neopixel.NeoPixel" not in top
+    # Import-time module body must not construct the strip. The pairing-sleep
+    # helper may construct NeoPixel at runtime after the portal.
+    import_body = top
+    marker = "async def _unclaimed_motion_deep_sleep"
+    if marker in import_body:
+        import_body = import_body.split(marker, 1)[0]
+    assert "neopixel.NeoPixel" not in import_body
     cfg = src.rfind("configure_board_hw")
     strip = src.rfind("neopixel.NeoPixel")
     tracker = src.rfind("Tracker(np_obj)")
@@ -356,7 +365,9 @@ def test_claimed_path_builds_strip_after_led_rail():
 def test_claimed_path_brings_up_led_rail_before_config():
     """Motion wake should power the strip before NVS Config/Tracker work."""
     src = _read("main.py")
-    _unclaimed, claimed = src.split('if __name__ == "__main__":', 1)[1].rsplit("else:", 1)
+    _unclaimed, claimed = src.split('if __name__ == "__main__":', 1)[1].rsplit(
+        "else:", 1
+    )
     rail = claimed.find("configure_board_hw")
     strip = claimed.find("neopixel.NeoPixel")
     config = claimed.find("Config()")

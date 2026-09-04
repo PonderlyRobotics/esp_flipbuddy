@@ -630,6 +630,289 @@ async def test_tracking_off_motion_skips_wifi_timer_checks_config():
     assert active.need_upload is True
 
 
+def _quiet_indicator_leds(trk):
+    for name in (
+        "front",
+        "back",
+        "left",
+        "right",
+        "top",
+        "bottom",
+        "front_cutout",
+        "back_cutout",
+    ):
+        led = getattr(trk, name).led
+        led.blinking_effect = AsyncMock()
+        led.error_led = AsyncMock()
+        led.inactive = AsyncMock()
+        led.reset_color = MagicMock()
+        led.update_blinking_params = MagicMock()
+        led.get_total_blink_time = MagicMock(return_value=0)
+        led.set_static_color = MagicMock()
+
+
+async def test_hint_stale_pin_wake_does_not_connect():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    with (
+        patch("main.wake_reason", return_value=main.PIN_WAKE),
+        patch("main.hint_is_fresh", return_value=False),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+        patch("main.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await active.show_face_indicator()
+    connect.assert_not_called()
+
+
+async def test_hint_fresh_pin_wake_starts_connect_during_indicator():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = "act-sleep"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.open = AsyncMock(return_value=True)
+    sess.is_open = MagicMock(return_value=True)
+    with (
+        patch("main.wake_reason", return_value=main.PIN_WAKE),
+        patch("main.hint_is_fresh", return_value=True),
+        patch(
+            "main.async_do_connect", new_callable=AsyncMock, return_value=True
+        ) as connect,
+        patch("main.cloud_session", return_value=sess),
+        patch(
+            "main.get_remote_config",
+            new_callable=AsyncMock,
+            return_value={"settings": {}},
+        ),
+        patch("main.dim_strip"),
+        patch("main.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await active.show_face_indicator()
+    connect.assert_awaited()
+    assert connect.await_count == 1
+
+
+async def test_hint_fresh_tracking_off_skips_early_wifi():
+    cfg = make_fake_config()
+    cfg.running["settings"]["active"] = False
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    with (
+        patch("main.wake_reason", return_value=main.PIN_WAKE),
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+        patch("main.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        await active.show_face_indicator()
+    connect.assert_not_called()
+
+
+async def test_timer_wake_never_early_radio():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    with (
+        patch("main.wake_reason", return_value=0),
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+    ):
+        await active.show_face_indicator()
+    connect.assert_not_called()
+
+
+async def test_preview_switch_posts_once_per_face_change():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = "act-sleep"
+    trk.right.activity_id = "act-work"
+    trk.front.led_color = "#111111"
+    trk.right.led_color = "#222222"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=True)
+    sess.post_ff = AsyncMock(return_value="")
+    with (
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.sta_is_connected", return_value=True),
+        patch("main.cloud_session", return_value=sess),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+    ):
+        await active._preview_switch("front")
+        await active._preview_switch("front")
+        await active._preview_switch("right")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+    connect.assert_not_called()
+    assert sess.post_ff.await_count == 2
+    orients = [c.args[1]["orientation"] for c in sess.post_ff.await_args_list]
+    assert orients == ["front", "right"]
+    assert sess.post_ff.await_args_list[0].args[0].endswith("sensor/live_event/")
+
+
+async def test_preview_switch_does_not_call_async_do_connect():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = "act-sleep"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=False)
+    sess.post_ff = AsyncMock()
+    sess.open = AsyncMock()
+    with (
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.sta_is_connected", return_value=False),
+        patch("main.cloud_session", return_value=sess),
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+    ):
+        await active._preview_switch("front")
+        await asyncio.sleep(0)
+    connect.assert_not_called()
+    sess.open.assert_not_called()
+    sess.post_ff.assert_not_called()
+
+
+async def test_preview_post_is_fire_and_forget():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = "act-sleep"
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=True)
+
+    async def hang(*_a, **_k):
+        await asyncio.sleep(5)
+        return None
+
+    sess.post_ff = hang
+    with (
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.sta_is_connected", return_value=True),
+        patch("main.cloud_session", return_value=sess),
+    ):
+        t0 = real_time.monotonic()
+        await active._preview_switch("front")
+        elapsed = real_time.monotonic() - t0
+    assert elapsed < 0.5
+    current = asyncio.current_task()
+    for task in asyncio.all_tasks():
+        if task is not current:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
+async def test_unassigned_face_no_preview_post():
+    cfg = make_fake_config()
+    trk = make_fake_tracker()
+    _quiet_indicator_leds(trk)
+    trk.front.activity_id = ""
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    sess = MagicMock()
+    sess.is_open = MagicMock(return_value=True)
+    sess.post_ff = AsyncMock()
+    with (
+        patch("main.hint_is_fresh", return_value=True),
+        patch("main.sta_is_connected", return_value=True),
+        patch("main.cloud_session", return_value=sess),
+    ):
+        await active._preview_switch("front")
+        await asyncio.sleep(0)
+    sess.post_ff.assert_not_called()
+
+
+async def test_uploadfsm_reuses_warm_session():
+    main.scheduler_wd = MagicMock()
+    upload = UploadFSM(
+        config=make_fake_config(),
+        tracker=make_fake_tracker(),
+        np_obj=make_fake_np(),
+        adc_vin=make_fake_adc(),
+        np_vcc=MagicMock(),
+        token="dev123",
+        headers={},
+        active_result={
+            "sleep_ms": 18000,
+            "need_upload": True,
+            "face_obj": None,
+            "ap_mode": False,
+        },
+    )
+
+    async def _wait_ms(coro, _ms):
+        return await coro
+
+    with (
+        patch("main.sta_is_connected", return_value=True),
+        patch(
+            "main.wait_for_connection", new_callable=AsyncMock, return_value=True
+        ) as wait,
+        patch("main.async_do_connect", new_callable=AsyncMock) as connect,
+        patch("main.sync_time_if_possible", new_callable=AsyncMock),
+        patch("main.read_battery_voltage", return_value={"adjusted_voltage_v": 3.7}),
+        patch("main.get_remote_config", new_callable=AsyncMock, return_value=None),
+        patch("main.ota_weekly_check", new_callable=AsyncMock, return_value=None),
+        patch(
+            "main.push_tracking_log_to_remote",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("main.wdt_feed"),
+        patch.object(main.asyncio, "wait_for_ms", _wait_ms, create=True),
+    ):
+        await upload.do_upload()
+    wait.assert_not_called()
+    connect.assert_not_called()
+    assert upload.is_connected is True
+
+
+def test_store_live_ok_until_not_in_settings_hash():
+    cfg = make_fake_config()
+    before = cfg.hash_digest()
+    stored = []
+
+    def _store(u):
+        stored.append(u)
+
+    with patch("main.store_live_ok_until", _store):
+        main.remember_live_ok_until(
+            {
+                "settings": {"active": True, "ota_enabled": True},
+                "live_ok_until": 1700000000,
+            }
+        )
+    assert stored == [1700000000]
+    assert cfg.hash_digest() == before
+    assert "live_ok_until" not in cfg.running["settings"]
+
+
+def test_missing_live_ok_until_is_stale():
+    with (
+        patch("main.load_live_ok_until", return_value=None),
+        patch("main.rtc_clock_sane", return_value=True),
+    ):
+        assert main.hint_is_fresh() is False
+    with (
+        patch("main.load_live_ok_until", return_value="nope"),
+        patch("main.rtc_clock_sane", return_value=True),
+    ):
+        assert main.hint_is_fresh() is False
+    with (
+        patch("main.load_live_ok_until", return_value=1_900_000_000),
+        patch("main.rtc_clock_sane", return_value=False),
+    ):
+        assert main.hint_is_fresh() is False
+
+
 async def test_start_tracking_clears_preview_then_blinks():
     cfg = make_fake_config()
     trk = make_fake_tracker()
@@ -1051,6 +1334,81 @@ if __name__ == "__main__":
             "test_tracking_off_motion_skips_wifi_timer_checks_config",
             test_tracking_off_motion_skips_wifi_timer_checks_config,
             is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_hint_stale_pin_wake_does_not_connect",
+            test_hint_stale_pin_wake_does_not_connect,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_hint_fresh_pin_wake_starts_connect_during_indicator",
+            test_hint_fresh_pin_wake_starts_connect_during_indicator,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_hint_fresh_tracking_off_skips_early_wifi",
+            test_hint_fresh_tracking_off_skips_early_wifi,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_timer_wake_never_early_radio",
+            test_timer_wake_never_early_radio,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_preview_switch_posts_once_per_face_change",
+            test_preview_switch_posts_once_per_face_change,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_preview_switch_does_not_call_async_do_connect",
+            test_preview_switch_does_not_call_async_do_connect,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_preview_post_is_fire_and_forget",
+            test_preview_post_is_fire_and_forget,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_unassigned_face_no_preview_post",
+            test_unassigned_face_no_preview_post,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_uploadfsm_reuses_warm_session",
+            test_uploadfsm_reuses_warm_session,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_store_live_ok_until_not_in_settings_hash",
+            test_store_live_ok_until_not_in_settings_hash,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_missing_live_ok_until_is_stale",
+            test_missing_live_ok_until_is_stale,
         )
     )
     results.append(

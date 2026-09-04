@@ -7,6 +7,7 @@ from settings import (
     MAX_INTENSITY,
     SOFTAP_LED_COLOR,
     TRIAD_FACES,
+    TX_DIM_FACTOR,
 )
 from util import suppress
 
@@ -65,6 +66,29 @@ def _pixel_count(np_obj):
         except TypeError:
             n = 6
     return n
+
+
+def dim_strip(np_obj, factor=None):
+    """Scale currently lit pixels down for STA/TLS TX. No-op if np_obj missing."""
+    if np_obj is None:
+        return
+    if factor is None:
+        factor = TX_DIM_FACTOR
+    try:
+        f = float(factor)
+    except (TypeError, ValueError):
+        f = TX_DIM_FACTOR
+    if f < 0:
+        f = 0
+    n = _pixel_count(np_obj)
+    for i in range(n):
+        try:
+            pix = np_obj[i]
+            np_obj[i] = (int(pix[0] * f), int(pix[1] * f), int(pix[2] * f))
+        except Exception:
+            pass
+    with suppress(Exception):
+        np_obj.write()
 
 
 def set_all_pixels(np_obj, hex_code, intensity_level=None):

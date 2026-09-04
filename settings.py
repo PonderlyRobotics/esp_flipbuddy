@@ -63,6 +63,7 @@ DEFAULT_API = DEFAULT_API_URL
 NVS_NS = "cred"
 KEY = "json"
 LAST_AP_KEY = "lastap"
+LIVE_OK_KEY = "liveok"
 AP_PSK_KEY = "appsk"
 AP_PSK_ALPHABET = PAIRING_ALPHABET
 AP_PSK_MIN_LEN = 8
@@ -77,6 +78,7 @@ CALIBRATION_GREEN = 1.0
 CALIBRATION_BLUE = 1.0
 MAX_INTENSITY = 50
 DEFAULT_INTENSITY_LEVEL = 1
+TX_DIM_FACTOR = 0.25
 LED_PINOUT = {
     "front": {"led": 0, "type": "neopixel"},
     "bottom": {"led": 1, "type": "neopixel"},
@@ -111,6 +113,7 @@ SYNC_POLL_MS = const(50)
 ASYNC_POLL_MS = const(100)
 FAST_TIMEOUT_S = const(2)
 DEFAULT_TIMEOUT_S = const(5)
+PREVIEW_HTTP_MS = const(300)
 
 
 def overlay_face_from_tilt(

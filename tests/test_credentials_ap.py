@@ -56,9 +56,7 @@ def test_psk_from_file_bytes_json_object_only():
 
 def test_load_ap_psk_migrates_json_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "ap_psk.json").write_text(
-        '{"ap_psk": "23456789"}\n', encoding="utf-8"
-    )
+    (tmp_path / "ap_psk.json").write_text('{"ap_psk": "23456789"}\n', encoding="utf-8")
     assert credentials.load_ap_psk() == "23456789"
     assert not (tmp_path / "ap_psk.json").exists()
 
@@ -66,9 +64,7 @@ def test_load_ap_psk_migrates_json_file(tmp_path, monkeypatch):
 def test_load_ap_psk_json_overwrites_nvs(tmp_path, monkeypatch):
     credentials.store_ap_psk("23456789ABCDEF")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "ap_psk.json").write_text(
-        '{"ap_psk": "ABCDEFGH"}\n', encoding="utf-8"
-    )
+    (tmp_path / "ap_psk.json").write_text('{"ap_psk": "ABCDEFGH"}\n', encoding="utf-8")
     assert credentials.load_ap_psk() == "ABCDEFGH"
     assert not (tmp_path / "ap_psk.json").exists()
 
@@ -77,6 +73,28 @@ def test_load_ap_psk_ignores_plaintext_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "ap_psk.txt").write_text("23456789\n", encoding="utf-8")
     assert credentials.load_ap_psk() is None
+
+
+def test_live_ok_until_roundtrip_is_epoch_only():
+    assert credentials.load_live_ok_until() is None
+    credentials.store_live_ok_until(1_700_000_000)
+    assert credentials.load_live_ok_until() == 1_700_000_000
+    nvs = credentials._get_nvs()
+    buf = bytearray(32)
+    size = nvs.get_blob("liveok", buf)
+    data = json.loads(buf[:size].decode())
+    assert data == {"u": 1_700_000_000}
+    assert "watching" not in data
+
+
+def test_live_ok_until_junk_is_missing():
+    nvs = credentials._get_nvs()
+    nvs.set_blob("liveok", b"not-json")
+    nvs.commit()
+    assert credentials.load_live_ok_until() is None
+    nvs.set_blob("liveok", b'{"watching": true}')
+    nvs.commit()
+    assert credentials.load_live_ok_until() is None
 
 
 def test_store_and_load_ap_psk_not_derived_from_device_id():

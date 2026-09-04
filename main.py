@@ -61,6 +61,8 @@ from http import (
     async_http_get,
     async_post_request,
     async_rotate_device_token,
+    close_cloud_session,
+    cloud_session,
     is_http_auth_error,
 )
 
@@ -68,7 +70,13 @@ import esp32
 import neopixel
 import uasyncio as asyncio
 import utime as time
-from credentials import load_ap_psk, load_credentials, print_missing_ap_psk_repl
+from credentials import (
+    load_ap_psk,
+    load_credentials,
+    load_live_ok_until,
+    print_missing_ap_psk_repl,
+    store_live_ok_until,
+)
 from machine import (
     DEEPSLEEP_RESET,
     PIN_WAKE,
@@ -91,7 +99,7 @@ from network_helper import (
 )
 import network_helper
 from ntptime import settime as ntp_settime
-from rgb import blink_tracking_off, set_all_pixels
+from rgb import blink_tracking_off, dim_strip, set_all_pixels
 from settings import (
     CPU_FREQ_HZ,
     DEBUG,
@@ -115,6 +123,7 @@ from settings import (
     SETTLE_STILL_MS,
     SETTLE_TIMEOUT_S,
     SOFTAP_CAPTIVE_PORTAL_ENABLED,
+    TX_DIM_FACTOR,
     SOFTAP_CUTOUT,
     TIMER_NUM,
     USB_CUTOUT,
@@ -175,13 +184,79 @@ else:
         "User-Agent": "Mozilla/5.0 (compatible; FlipBuddy/ESP32; +https://flipbuddy.app)",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "close",
+        "Connection": "keep-alive",
     }
     API_BASE = device_cred.get("api_url", "https://api.flipbuddy.app/v1/api/")
     if not API_BASE.endswith("/"):
         API_BASE += "/"
 
 rtc_mem = RTC()
+
+_UNIX_2000 = 946684800
+_RTC_SANE_YEAR = 2024
+_wake_remote_config = None
+
+
+def sta_is_connected():
+    try:
+        import network
+
+        return bool(network.WLAN(network.STA_IF).isconnected())
+    except Exception:
+        return False
+
+
+def rtc_clock_sane():
+    try:
+        return time.localtime()[0] >= _RTC_SANE_YEAR
+    except Exception:
+        return False
+
+
+def now_unix():
+    try:
+        now = int(time.time())
+    except Exception:
+        return 0
+    if now < 1_000_000_000:
+        now += _UNIX_2000
+    return now
+
+
+def hint_is_fresh():
+    """True when RTC is sane and NVS live_ok_until is a future unix epoch."""
+    if not rtc_clock_sane():
+        return False
+    until = None
+    try:
+        until = load_live_ok_until()
+    except Exception:
+        until = None
+    if until is None:
+        return False
+    try:
+        u = int(until)
+    except (TypeError, ValueError):
+        return False
+    if u <= 0:
+        return False
+    return now_unix() < u
+
+
+def remember_live_ok_until(remote):
+    """Persist GET live_ok_until outside Config.settings (hash stays clean)."""
+    if not isinstance(remote, dict):
+        return
+    if "live_ok_until" not in remote:
+        with suppress(Exception):
+            store_live_ok_until(0)
+        return
+    try:
+        u = int(remote.get("live_ok_until"))
+    except (TypeError, ValueError):
+        return
+    with suppress(Exception):
+        store_live_ok_until(u)
 
 
 def _recover_http_auth(config):
@@ -191,7 +266,7 @@ def _recover_http_auth(config):
 
 
 async def _http_get_bytes(url, headers, timeout=30):
-    """Full HTTPS GET. Frozen http.py truncates at 2048 when Content-Length is missing."""
+    """OTA / large-body GET. Wake config GET+POST use HttpSession keep-alive instead."""
     if not str(url or "").startswith("https://"):
         return None, None
     rest = url[8:]
@@ -208,9 +283,12 @@ async def _http_get_bytes(url, headers, timeout=30):
         asyncio.open_connection(host, port, ssl=True, server_hostname=host),
         timeout,
     )
-    req = "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n" % (
-        path,
-        host,
+    req = (
+        "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n"
+        % (
+            path,
+            host,
+        )
     )
     if headers:
         for k, v in headers.items():
@@ -277,15 +355,25 @@ async def _http_get_bytes(url, headers, timeout=30):
 
 
 async def get_remote_config(config=None):
-    """Fetch remote configuration. Must be a dict; frozen GET truncates JSON."""
+    """Fetch remote configuration on the wake HttpSession (full Content-Length body)."""
+    global _wake_remote_config
+    if isinstance(_wake_remote_config, dict):
+        return _wake_remote_config
     try:
-        code, raw = await _http_get_bytes(
-            API_BASE + "sensor/data/%s/" % TOKEN, HEADERS, timeout=30
+        sess = cloud_session()
+        if not sess.is_open():
+            if not await sess.open(API_BASE):
+                return False
+        raw = await sess.request(
+            "GET",
+            API_BASE + "sensor/data/%s/" % TOKEN,
+            headers=HEADERS,
+            timeout=30,
         )
-        if code in (401, 403):
+        if is_http_auth_error(raw):
             _recover_http_auth(config)
             return False
-        if code != 200 or not raw:
+        if not raw:
             return False
         import ujson as json
 
@@ -293,6 +381,8 @@ async def get_remote_config(config=None):
         if not isinstance(obj, dict) or "settings" not in obj:
             print("remote config JSON incomplete", len(raw or b""))
             return False
+        remember_live_ok_until(obj)
+        _wake_remote_config = obj
         return obj
     except Exception as e:
         print("get_remote_config:", e)
@@ -305,14 +395,23 @@ async def push_tracking_log_to_remote(data, timeout=5, config=None):
     try:
         # Rotate may issue a new token (saved to NVS). Also refresh in-memory
         # HEADERS so this same wake's POST does not still send the old token.
-        new_token = await async_rotate_device_token(API_BASE + "sensor/token/rotate/")
+        sess = cloud_session()
+        if not sess.is_open():
+            await sess.open(API_BASE)
+        new_token = await async_rotate_device_token(
+            API_BASE + "sensor/token/rotate/", session=sess
+        )
         if is_http_auth_error(new_token):
             _recover_http_auth(config)
             return False
         if new_token:
             HEADERS["Device-Token"] = new_token
         posted = await async_post_request(
-            API_BASE + "sensor/data/", data, extra_header=HEADERS, timeout=timeout
+            API_BASE + "sensor/data/",
+            data,
+            extra_header=HEADERS,
+            timeout=timeout,
+            session=sess,
         )
         if is_http_auth_error(posted):
             _recover_http_auth(config)
@@ -500,6 +599,8 @@ async def prepare_for_deep_sleep(
     """
     dprint("prepare_for_deep_sleep: powering down peripherals for minimal current draw")
     gc.collect()
+    with suppress(Exception):
+        await close_cloud_session()
 
     # Safe fallbacks to module-level objects
     if np_vcc is None:
@@ -662,9 +763,12 @@ async def _ota_stream_sha256(url, headers, timeout=120, part=None, part_size=0):
         asyncio.open_connection(host, port, ssl=True, server_hostname=host),
         timeout,
     )
-    req = "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n" % (
-        path,
-        host,
+    req = (
+        "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\nAccept-Encoding: identity\r\n"
+        % (
+            path,
+            host,
+        )
     )
     if headers:
         for k, v in headers.items():
@@ -1154,6 +1258,7 @@ class ActiveFSM(BaseFSM):
         self.state = self.S_FACE_INDICATOR
         self.face_obj = None
         self._preview_face = None
+        self._radio_task = None
         self._mpu = None
         self.sleep_ms = (
             self.config.running["settings"].get(
@@ -1296,41 +1401,112 @@ class ActiveFSM(BaseFSM):
                 face_name = cube_face_upward(s)
         await blink_tracking_off(self.np_obj, self.np_vcc, face=face_name)
 
+    def _should_warm_radio(self):
+        if wake_reason() != PIN_WAKE:
+            return False
+        if self.is_tracking_off():
+            return False
+        return hint_is_fresh()
+
+    async def _warm_radio(self):
+        """STA + TLS and GET config during the 7s map. Never called from settle."""
+        try:
+            with suppress(Exception):
+                dim_strip(self.np_obj, TX_DIM_FACTOR)
+            if not await async_do_connect(timeout=5):
+                return
+            sess = cloud_session()
+            await sess.open(API_BASE)
+            await get_remote_config(self.config)
+        except Exception as e:
+            dprint("warm radio:", e)
+
     async def show_face_indicator(self):
-        if wake_reason() == PIN_WAKE:
-            self.np_vcc.on()
-            assigned_face = [
-                getattr(self.tracker, f)
-                for f in FACES
-                if getattr(self.tracker, f).activity_id != ""
-            ]
-            ref_face = self.tracker.back_cutout
-            if assigned_face:
-                indicator_fade_time = DEFAULT_INDICATOR_BLINK_DURATION  # 7 seconds
-                for face in assigned_face:
-                    face.led.duration_ms = indicator_fade_time
-                    face.led.cycles = DEFAULT_INDICATOR_BLINK_CYCLE
-                    face.led.update_blinking_params()
-                await asyncio.gather(
-                    *[face.led.blinking_effect() for face in assigned_face]
-                )
-                for face in assigned_face:
-                    face.led.reset_color()
-                    with suppress(asyncio.CancelledError):
-                        await face.led.inactive()
-            else:
-                await ref_face.led.error_led(status=True, color_hex="#11D6EC")
-                t = ref_face.led.get_total_blink_time()
-                await asyncio.sleep(t)
-                await ref_face.led.error_led(status=False)
-                ref_face.led.reset_color()
-            with suppress(asyncio.CancelledError):
-                await ref_face.led.inactive()
+        if wake_reason() != PIN_WAKE:
+            return
+        self.np_vcc.on()
+        radio_task = None
+        if self._should_warm_radio():
+            radio_task = asyncio.create_task(self._warm_radio())
+            self._radio_task = radio_task
+        assigned_face = [
+            getattr(self.tracker, f)
+            for f in FACES
+            if getattr(self.tracker, f).activity_id != ""
+        ]
+        ref_face = self.tracker.back_cutout
+        if assigned_face:
+            indicator_fade_time = DEFAULT_INDICATOR_BLINK_DURATION  # 7 seconds
+            for face in assigned_face:
+                face.led.duration_ms = indicator_fade_time
+                face.led.cycles = DEFAULT_INDICATOR_BLINK_CYCLE
+                face.led.update_blinking_params()
+            await asyncio.gather(
+                *[face.led.blinking_effect() for face in assigned_face]
+            )
+            for face in assigned_face:
+                face.led.reset_color()
+                with suppress(asyncio.CancelledError):
+                    await face.led.inactive()
+        else:
+            await ref_face.led.error_led(status=True, color_hex="#11D6EC")
+            t = ref_face.led.get_total_blink_time()
+            await asyncio.sleep(t)
+            await ref_face.led.error_led(status=False)
+            ref_face.led.reset_color()
+        with suppress(asyncio.CancelledError):
+            await ref_face.led.inactive()
+        if radio_task is not None:
+            try:
+                await asyncio.wait_for(radio_task, 0.5)
+            except asyncio.TimeoutError:
+                pass
+            except Exception:
+                pass
 
     def _face_from_name(self, face_name):
         if not face_name or face_name in ("out_margin", "unknown"):
             return None
         return getattr(self.tracker, face_name, None)
+
+    def _kick_live_preview(self, face):
+        if self.is_tracking_off():
+            return
+        if not hint_is_fresh():
+            return
+        if not sta_is_connected():
+            return
+        try:
+            asyncio.create_task(self._live_preview_post(face))
+        except Exception:
+            pass
+
+    async def _live_preview_post(self, face):
+        """Fire-and-forget live_event. Never async_do_connect."""
+        try:
+            sess = cloud_session()
+            if not sess.is_open():
+                return
+            color = getattr(face, "led_color", None)
+            if not color:
+                led = getattr(face, "led", None)
+                color = getattr(led, "hex_code", "") if led is not None else ""
+            payload = {
+                "type": "orientation_preview",
+                "orientation": getattr(face, "orientation", ""),
+                "color": color or "",
+            }
+            aid = getattr(face, "activity_id", "") or ""
+            if aid:
+                payload["activity_id"] = aid
+            an = getattr(face, "activity_name", "") or ""
+            if an:
+                payload["activity_name"] = an
+            await sess.post_ff(
+                API_BASE + "sensor/live_event/", payload, headers=HEADERS
+            )
+        except Exception as e:
+            dprint("live_event:", e)
 
     async def _preview_switch(self, face_name):
         """Light one assigned activity RGB; previous off. No errors, no tracking."""
@@ -1348,6 +1524,7 @@ class ActiveFSM(BaseFSM):
         led = face.led
         led.status = "ACTIVE"
         led.set_static_color()
+        self._kick_live_preview(face)
 
     async def _clear_preview(self):
         if self._preview_face is not None:
@@ -1561,7 +1738,7 @@ class ActiveFSM(BaseFSM):
         )
         upload_due = last_upload == "" or time_since_upload >= upload_freq
         if self.is_tracking_off():
-            # Motion pick: blink already done; skip Wi‑Fi. Config on timer / USB / log.
+            # Motion pick: blink already done; skip Wi-Fi. Config on timer / USB / log.
             motion = wake_reason() == PIN_WAKE
             need_upload = has_log or usb_connected or (upload_due and not motion)
         else:
@@ -1661,7 +1838,8 @@ class UploadFSM(BaseFSM):
         dprint("Uploading tracking log...")
         wdt_feed()
         # SoftAP must be off before STA; wait_for_connection -> _prepare_sta does that
-        if await wait_for_connection():
+        already = sta_is_connected()
+        if already or await wait_for_connection():
             self.is_connected = True
             # Deep-sleep wakes skip BootFSM NTP; refresh clock before upload
             await sync_time_if_possible()
@@ -1746,6 +1924,8 @@ class UploadFSM(BaseFSM):
 
     async def cleanup_and_sleep(self):
         dprint("Cleaning up and preparing for deep sleep...")
+        with suppress(Exception):
+            await close_cloud_session()
 
         face = self.active_result.get("face_obj")
         if face:

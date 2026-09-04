@@ -18,6 +18,7 @@ from settings import (
     AP_PSK_MIN_LEN,
     KEY,
     LAST_AP_KEY,
+    LIVE_OK_KEY,
     NVS_NS,
 )
 from util import suppress
@@ -206,6 +207,39 @@ def load_last_ap():
     if not isinstance(data, dict) or not data.get("ssid"):
         return None
     return data
+
+
+def load_live_ok_until():
+    """NVS live-ok epoch, or None if missing/junk. Not a watching bool."""
+    nvs = _get_nvs()
+    buffer = bytearray(32)
+    try:
+        size = nvs.get_blob(LIVE_OK_KEY, buffer)
+        if not size:
+            return None
+        data = ujson.loads(buffer[:size].decode())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return int(data.get("u"))
+    except (TypeError, ValueError):
+        return None
+
+
+def store_live_ok_until(until):
+    """Persist {"u": epoch} only. Separate from Config.settings hash."""
+    try:
+        u = int(until)
+    except (TypeError, ValueError):
+        return
+    payload = ujson.dumps({"u": u}).encode()
+    nvs = _get_nvs()
+    with suppress(OSError):
+        nvs.erase_key(LIVE_OK_KEY)
+    nvs.set_blob(LIVE_OK_KEY, payload)
+    nvs.commit()
 
 
 def store_last_ap(ssid, bssid=None, channel=0):
