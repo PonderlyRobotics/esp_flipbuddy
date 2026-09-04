@@ -386,8 +386,9 @@ async def test_activefsm_face_indicator_to_detect():
     # The transition action is show_face_indicator (now fixed name)
     # PIN_WAKE then live-settles at 5 Hz before FACE_DETECT
     transitions = active.rules.get("FACE_INDICATOR", [])
-    assert len(transitions) == 1
-    assert transitions[0].next_state == "FACE_SETTLE"
+    assert len(transitions) == 2
+    assert transitions[0].next_state == "TRACKING_OFF"
+    assert transitions[1].next_state == "FACE_SETTLE"
     settle = active.rules.get("FACE_SETTLE", [])
     assert len(settle) == 1
     assert settle[0].next_state == "FACE_DETECT"
@@ -555,6 +556,78 @@ async def test_detect_face_reuses_mpu_from_settle():
         await active.detect_face()
     si.assert_not_called()
     mpu.enable_low_power_dmp_motion_detection.assert_called()
+
+
+def test_apply_remote_config_stores_active():
+    cfg = make_fake_config()
+    assert cfg.running["settings"].get("active", True) is True
+    cfg.apply_remote_config(
+        {
+            "settings": {
+                "orientation_check_frequency": 18,
+                "ota_enabled": True,
+                "remote_server": "https://api.flipbuddy.app",
+                "active": False,
+            }
+        }
+    )
+    assert cfg.running["settings"]["active"] is False
+
+
+async def test_tracking_off_uses_profile_sleep_and_upward_face_led():
+    cfg = make_fake_config()
+    cfg.running["settings"]["active"] = False
+    cfg.running["settings"]["upload_frequency"] = 300
+    trk = make_fake_tracker()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.front
+    assert active.is_tracking_off() is True
+    first = next(t for t in active.rules[active.S_FACE_INDICATOR] if t.condition())
+    assert first.next_state == active.S_TRACKING_OFF
+    with patch("main.blink_tracking_off", new_callable=AsyncMock) as blink:
+        await active.show_tracking_off_led()
+    blink.assert_awaited()
+    assert blink.await_args.kwargs.get("face") == "front"
+    assert active.sleep_ms == 300_000
+
+
+async def test_tracking_off_does_not_enter_softap():
+    cfg = make_fake_config()
+    cfg.running["settings"]["active"] = False
+    trk = make_fake_tracker()
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    active.face_obj = trk.back_cutout
+    checked = active.rules[active.S_FACE_CHECKED]
+    chosen = next(t for t in checked if t.condition())
+    assert chosen.next_state == active.S_TRACKING_OFF
+    with patch("main.blink_tracking_off", new_callable=AsyncMock) as blink:
+        await active.show_tracking_off_led()
+    assert blink.await_args.kwargs.get("face") == "back_cutout"
+
+
+async def test_tracking_off_motion_skips_wifi_timer_checks_config():
+    cfg = make_fake_config()
+    cfg.running["settings"]["active"] = False
+    cfg.running["settings"]["upload_frequency"] = 300
+    trk = make_fake_tracker()
+    trk.running["last_config_uploaded"] = "2000-01-01T00:00:00Z"
+    if hasattr(trk, "tracking_log_nonempty"):
+        trk.tracking_log_nonempty = MagicMock(return_value=False)
+    else:
+        trk.running["tracking_log"] = {}
+    active = ActiveFSM(cfg, trk, make_fake_np(), make_fake_adc(), MagicMock())
+    with (
+        patch("main.wake_reason", return_value=main.PIN_WAKE),
+        patch("main.read_battery_voltage", return_value={"adjusted_voltage_v": 3.7}),
+    ):
+        await active.decide_upload()
+    assert active.need_upload is False
+    with (
+        patch("main.wake_reason", return_value=0),
+        patch("main.read_battery_voltage", return_value={"adjusted_voltage_v": 3.7}),
+    ):
+        await active.decide_upload()
+    assert active.need_upload is True
 
 
 async def test_start_tracking_clears_preview_then_blinks():
@@ -950,6 +1023,33 @@ if __name__ == "__main__":
         _run_test(
             "test_detect_face_reuses_mpu_from_settle",
             test_detect_face_reuses_mpu_from_settle,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_apply_remote_config_stores_active",
+            test_apply_remote_config_stores_active,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_tracking_off_uses_profile_sleep_and_upward_face_led",
+            test_tracking_off_uses_profile_sleep_and_upward_face_led,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_tracking_off_does_not_enter_softap",
+            test_tracking_off_does_not_enter_softap,
+            is_async=True,
+        )
+    )
+    results.append(
+        _run_test(
+            "test_tracking_off_motion_skips_wifi_timer_checks_config",
+            test_tracking_off_motion_skips_wifi_timer_checks_config,
             is_async=True,
         )
     )

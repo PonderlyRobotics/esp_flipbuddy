@@ -91,7 +91,7 @@ from network_helper import (
 )
 import network_helper
 from ntptime import settime as ntp_settime
-from rgb import set_all_pixels
+from rgb import blink_tracking_off, set_all_pixels
 from settings import (
     CPU_FREQ_HZ,
     DEBUG,
@@ -1142,6 +1142,7 @@ class ActiveFSM(BaseFSM):
     S_STOP_FACE_CHECK = "STOP_FACE_CHECK"
     S_ACTIVE_TRACKING = "ACTIVE_TRACKING"
     S_STOP_TRACKING = "STOP_TRACKING"
+    S_TRACKING_OFF = "TRACKING_OFF"
     S_UPLOAD_NEEDED = "UPLOAD_NEEDED"
 
     def __init__(self, config, tracker, np_obj, adc_vin, np_vcc):
@@ -1166,8 +1167,13 @@ class ActiveFSM(BaseFSM):
         self.rules = {
             self.S_FACE_INDICATOR: [
                 Transition(
+                    self.S_TRACKING_OFF,
+                    lambda: self.is_tracking_off(),
+                    lambda: self.show_tracking_off_led(),
+                ),
+                Transition(
                     self.S_FACE_SETTLE, lambda: True, lambda: self.show_face_indicator()
-                )
+                ),
             ],
             self.S_FACE_SETTLE: [
                 Transition(
@@ -1180,6 +1186,11 @@ class ActiveFSM(BaseFSM):
                 ),
             ],
             self.S_FACE_CHECKED: [
+                Transition(
+                    self.S_TRACKING_OFF,
+                    lambda: self.is_tracking_off(),
+                    lambda: self.show_tracking_off_led(),
+                ),
                 Transition(
                     self.S_AP_MODE,
                     lambda: (
@@ -1209,6 +1220,11 @@ class ActiveFSM(BaseFSM):
             self.S_DEEP_SLEEP: [],
             self.S_STOP_FACE_CHECK: [
                 Transition(
+                    self.S_TRACKING_OFF,
+                    lambda: self.is_tracking_off(),
+                    lambda: self.show_tracking_off_led(),
+                ),
+                Transition(
                     self.S_ACTIVE_TRACKING,
                     lambda: not self.is_stop_face(),
                     lambda: self.start_tracking(),
@@ -1229,6 +1245,11 @@ class ActiveFSM(BaseFSM):
                     self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()
                 ),
             ],
+            self.S_TRACKING_OFF: [
+                Transition(
+                    self.S_UPLOAD_NEEDED, lambda: True, lambda: self.decide_upload()
+                ),
+            ],
             self.S_UPLOAD_NEEDED: [],
         }
 
@@ -1236,6 +1257,44 @@ class ActiveFSM(BaseFSM):
         wdt_feed()
         dprint(self.face_obj)
         return face_is_stop(self.face_obj)
+
+    def is_tracking_off(self):
+        return self.config.running["settings"].get("active", True) is False
+
+    async def show_tracking_off_led(self):
+        """Disabled cue: rapid red on upward face (triad if cutout). Finalize open session."""
+        wdt_feed()
+        has_open = False
+        for face in self.tracker.running.get("faces", []):
+            if getattr(face, "tracking", False):
+                has_open = True
+                break
+        if has_open:
+            orient = self.face_obj.orientation if self.face_obj else None
+            with suppress(Exception):
+                await self.tracker.finalize_and_persist(active_orientation=orient)
+        # Timer wake for config uses upload_frequency (e.g. 300s), not orientation 18s.
+        base = self.config.running["settings"].get(
+            "upload_frequency", DEFAULT_UPLOAD_FRQ
+        )
+        self.sleep_ms = int(base) * 1000
+        face_name = self.face_obj.orientation if self.face_obj else None
+        if face_name is None:
+            with suppress(Exception):
+                s = self._mpu
+                if s is None:
+                    s = sensor_init(
+                        enable_mpu=True,
+                        calibrate=False,
+                        mean=self.config.running["calibration"]["mean"],
+                        stddev=self.config.running["calibration"]["stddev"],
+                        sda_pin=I2C_SDA,
+                        scl_pin=I2C_SCL,
+                        intruppt_pin=MPU_INT_PIN,
+                    )
+                    self._mpu = s
+                face_name = cube_face_upward(s)
+        await blink_tracking_off(self.np_obj, self.np_vcc, face=face_name)
 
     async def show_face_indicator(self):
         if wake_reason() == PIN_WAKE:
@@ -1500,14 +1559,19 @@ class ActiveFSM(BaseFSM):
         time_since_upload = (
             time.time() - str_to_epoch(last_upload) if last_upload else float("inf")
         )
-        need_upload = (
-            last_upload == ""
-            or time_since_upload >= upload_freq
-            or face_is_stop(self.face_obj)
-            or has_log
-            or usb_connected
-            or wake_reason() == PIN_WAKE
-        )
+        upload_due = last_upload == "" or time_since_upload >= upload_freq
+        if self.is_tracking_off():
+            # Motion pick: blink already done; skip Wi‑Fi. Config on timer / USB / log.
+            motion = wake_reason() == PIN_WAKE
+            need_upload = has_log or usb_connected or (upload_due and not motion)
+        else:
+            need_upload = (
+                upload_due
+                or face_is_stop(self.face_obj)
+                or has_log
+                or usb_connected
+                or wake_reason() == PIN_WAKE
+            )
         self.need_upload = need_upload
         dprint(
             "need_upload=",

@@ -79,6 +79,45 @@ def set_all_pixels(np_obj, hex_code, intensity_level=None):
     np_obj.write()
 
 
+def _tracking_off_led_indices(face=None):
+    """LED indices for the upward face. Cutouts use TRIAD_FACES; else one pinout LED."""
+    if face and face in TRIAD_FACES:
+        return [pinout[f]["led"] for f in TRIAD_FACES[face] if f in pinout]
+    if face and face in pinout:
+        return [pinout[face]["led"]]
+    return [pinout["top"]["led"]]
+
+
+async def blink_tracking_off(
+    np_obj, np_vcc=None, face=None, cycles=12, on_ms=120, off_ms=100
+):
+    """Rapid red blink on the upward face (tracking disabled).
+
+    Activity faces: that face's NeoPixel. Cutouts: TRIAD_FACES for that view.
+    Longer than a single activity tick so the cue is readable in a bag.
+    Distinct from stop-face triad color and out_margin error_led.
+    """
+    if np_obj is None:
+        return
+    if np_vcc is not None:
+        with suppress(Exception):
+            np_vcc.on()
+    leds = _tracking_off_led_indices(face)
+    n = _pixel_count(np_obj)
+    red = _hex_to_np_rgb("#FF0000")
+    for _ in range(cycles):
+        for i in range(n):
+            np_obj[i] = (0, 0, 0)
+        for led_i in leds:
+            np_obj[led_i] = red
+        np_obj.write()
+        await asyncio.sleep_ms(on_ms)
+        for led_i in leds:
+            np_obj[led_i] = (0, 0, 0)
+        np_obj.write()
+        await asyncio.sleep_ms(off_ms)
+
+
 def show_pairing_portal_leds(np_obj, np_vcc=None):
     """All six LEDs solid yellow while unclaimed pairing SoftAP is up.
 

@@ -78,6 +78,19 @@ def test_softap_indicator_disabled_is_noop():
     assert np._data == [(0, 0, 0)] * 6
 
 
+def test_tracking_off_indices_activity_face_and_cutout_triad():
+    from rgb import pinout
+
+    assert rgb._tracking_off_led_indices("front") == [pinout["front"]["led"]]
+    back = rgb._tracking_off_led_indices("back_cutout")
+    assert set(back) == {
+        pinout["left"]["led"],
+        pinout["back"]["led"],
+        pinout["bottom"]["led"],
+    }
+    assert rgb._tracking_off_led_indices(None) == [pinout["top"]["led"]]
+
+
 def test_pairing_portal_leds_all_six_yellow():
     np = _NP()
     vcc = MagicMock()
