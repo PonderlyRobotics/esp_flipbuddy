@@ -4,111 +4,178 @@ digraph FlipBuddy_FSM {
     edge [fontname="Arial", fontsize=9, arrowsize=0.7];
 
     // ==================================================================
-    // TOP LEVEL ORCHESTRATION (in async def main + if __name__)
+    // TOP LEVEL ORCHESTRATION (main.py: _early_softap_gate + __main__ + main())
     // ==================================================================
-    // Cold boot (first power/hard reset): runs BootFSM once → 100ms sleep
-    //   → all subsequent wakes are DEEPSLEEP_RESET → ActiveFSM + UploadFSM only.
-    // Every wake (timer or PIN_WAKE via low-power DMP motion IRQ):
-    //   ActiveFSM (face detect + track/stop decision) then UploadFSM (optional) then deepsleep.
-    PowerOn [fillcolor="#f8f8ff", label="Power On\n(esp32 boot)"];
+    // Order of ownership on every process start:
+    //   1) _early_softap_gate() — BEFORE heavy imports. If RTC memory starts with
+    //      FBAP1 and reset_cause() == SOFT_RESET, run ap_session (claimed SoftAP
+    //      portal) then deepsleep. Stale FBAP1 after power-on/hard reset is cleared
+    //      so BootFSM is not stolen.
+    //   2) __main__: unclaimed (no device token) → pairing SoftAP or missing-PSK
+    //      REPL. Claimed → soft WDT timer + release leftover SoftAP + Config/Tracker
+    //      + asyncio.run(main()).
+    //   3) main():
+    //      - DEEPSLEEP_RESET → ActiveFSM then UploadFSM.
+    //      - else (cold / hard / soft reset that did not take SoftAP gate) → BootFSM.
+    //        If pairing_identify is on after Boot, ActiveFSM+UploadFSM also run on
+    //        this same boot (USB often cannot DEEPSLEEP_RESET; confirm-green still).
+    //
+    // Wake sources after a normal deepsleep:
+    //   - Timer (orientation_check_frequency, default 18s; or upload_frequency when
+    //     tracking is paused; or fib backoff while on stop face).
+    //   - PIN_WAKE / EXT0 from low-power DMP motion IRQ (MPU INT).
+    //   Super Mini often timer-wakes even after a pickup; live preview can still run
+    //   on TIMER when the dashboard hint (live_ok_until) is fresh.
+    PowerOn [fillcolor="#f8f8ff", label="Process start\n(main.py load)"];
+    EarlySoftApGate [fillcolor="#b39ddb", label="Early SoftAP gate\nFBAP1 + SOFT_RESET?\n(before heavy imports)"];
+    CredCheck [fillcolor="#e8f0fe", label="CREDENTIALS_OK?\n(device token in NVS)"];
+    UnclaimedPath [fillcolor="#ffe0b2", label="Unclaimed path\npairing SoftAP\nor missing-PSK REPL"];
     DeepSleepResetCheck [fillcolor="#e8f0fe", label="reset_cause() ==\nDEEPSLEEP_RESET ?"];
-    BootPath [fillcolor="#fff8e1", label="Cold Boot Path\n(BootFSM only once)"];
-    ActivePath [fillcolor="#e8f5e9", label="Wake Path\n(ActiveFSM + UploadFSM)"];
+    BootPath [fillcolor="#fff8e1", label="Cold / hard / soft boot\nBootFSM"];
+    ActivePath [fillcolor="#e8f5e9", label="Wake path\nActiveFSM → UploadFSM"];
+    SoftApSession [fillcolor="#b39ddb", label="ap_session / ApModeFSM\n~5 min captive portal\nyellow SoftAP LEDs"];
+    SoftApSleep [fillcolor="#cfd8dc", label="deepsleep(SLEEP_MS)\n18s → next wake"];
+    UnclaimedMotionSleep [fillcolor="#cfd8dc", label="Motion-only deepsleep\n(sleep_ms=0, EXT0)\nafter pairing exits\nwithout a token"];
 
-    PowerOn -> DeepSleepResetCheck;
-    DeepSleepResetCheck -> ActivePath [label="Yes (PIN_WAKE or timer)"];
-    DeepSleepResetCheck -> BootPath [label="No (first power or hard reset)"];
+    PowerOn -> EarlySoftApGate;
+    EarlySoftApGate -> SoftApSession [label="Yes (FBAP1 + soft_reset)"];
+    SoftApSession -> SoftApSleep [label="portal done"];
+    SoftApSession -> CredCheck [label="SoftAP bring-up fail\n→ hand back to main", style=dashed];
+    SoftApSleep -> ActivePath [label="timer wake", style=dotted];
+    EarlySoftApGate -> CredCheck [label="No / stale FBAP1 cleared"];
+    CredCheck -> UnclaimedPath [label="No token"];
+    CredCheck -> DeepSleepResetCheck [label="Claimed"];
+    UnclaimedPath -> UnclaimedMotionSleep [label="portal timeout /\nno claim"];
+    UnclaimedMotionSleep -> CredCheck [label="PIN_WAKE (motion)", style=dotted];
+    DeepSleepResetCheck -> ActivePath [label="Yes (timer or PIN_WAKE)"];
+    DeepSleepResetCheck -> BootPath [label="No"];
 
     // ==================================================================
-    // BOOTFSM (only on cold boot)
+    // BOOTFSM (cold / hard / soft boot that did not enter SoftAP gate)
     // ==================================================================
-    // One-time: sensor + WiFi + NTP + fetch remote config + apply faces.
-    // Ends with a very short 100ms deepsleep so the next main() iteration
-    // takes the DEEPSLEEP_RESET (Active+Upload) path.
+    // One-time (per non-deepsleep boot): sensor + WiFi attempt + (online) NTP +
+    // remote config + apply faces. Offline-first: WiFi failure does NOT reset();
+    // it continues with NVS / default faces via boot_offline().
+    // Ends with prepare_for_deep_sleep(..., 100ms) so the next process is
+    // DEEPSLEEP_RESET → Active+Upload — unless pairing_identify skips sleep and
+    // main() runs Active+Upload immediately on this boot.
+    // Note: BootFSM.rules still list DEEP_SLEEP_WAKE → FACE_DETECT, but run()
+    // returns "SKIP" on DEEPSLEEP_RESET, so that transition is unused.
     FirstBoot [fillcolor="#fff9c4", label="FIRST_BOOT"];
-    SensorInit [fillcolor="#c8e6c9", label="SENSOR_INIT\nsensor_init + upload_dmp_firmware\nstore mean/stddev in Config"];
+    SensorInit [fillcolor="#c8e6c9", label="SENSOR_INIT\nsensor_init + DMP upload\ncalibrate unless deepsleep\nwake already has mean/stddev"];
     WifiConnect [fillcolor="#ffe0b2", label="WIFI_CONNECT\nwait_for_connection()"];
-    SyncNTP [fillcolor="#c8e6c9", label="SYNC_NTP\nntp_settime() + rgb_self_test"];
-    FetchConfig [fillcolor="#e1bee7", label="FETCH_CONFIG\nGET /sensor/data/{id}/"];
-    Calibrate [fillcolor="#e1bee7", label="CALIBRATE\n(placeholder)"];
+    SyncNTP [fillcolor="#c8e6c9", label="SYNC_NTP\nntp + session reconcile\n+ rgb_self_test"];
+    FetchConfig [fillcolor="#e1bee7", label="FETCH_CONFIG\nGET remote config\n(+ pairing identify blink)"];
+    BootOffline [fillcolor="#fff9c4", label="boot_offline()\nrgb_self_test + reconcile\nkeep NVS / default faces"];
+    Calibrate [fillcolor="#e1bee7", label="CALIBRATE\n(placeholder apply step)"];
     ParseFaces [fillcolor="#fff9c4", label="PARSE_FACES\ntracker.parse_faces()"];
-    ApplyRemote [fillcolor="#c8e6c9", label="APPLY_REMOTE\ntracker.apply_remote_config()\n+ save"];
+    ApplyRemote [fillcolor="#c8e6c9", label="APPLY_REMOTE\ntracker.apply_remote_config()\nsave only if hash changed"];
     DisconnectBoot [fillcolor="#eeeeee", label="DISCONNECT\nawait disconnect_wifi()"];
-    DeepSleep100 [fillcolor="#cfd8dc", label="DEEP_SLEEP\n(100 ms)\n→ forces wake path next"];
+    DeepSleep100 [fillcolor="#cfd8dc", label="DEEP_SLEEP\n100 ms handoff\n→ ActiveFSM next"];
+    PairingIdentifySkip [fillcolor="#c8e6c9", label="pairing_identify on\nskip deepsleep\n→ Active+Upload same boot"];
 
     BootPath -> FirstBoot;
     FirstBoot -> SensorInit;
     SensorInit -> WifiConnect;
     WifiConnect -> SyncNTP [label="is_connected"];
-    WifiConnect -> DeepSleepLong [label="fail → reset()", style=dashed, color="red"];
+    WifiConnect -> BootOffline [label="WiFi fail\n(offline-first)"];
+    BootOffline -> Calibrate;
     SyncNTP -> FetchConfig;
     FetchConfig -> Calibrate;
     Calibrate -> ParseFaces;
     ParseFaces -> ApplyRemote;
     ApplyRemote -> DisconnectBoot;
-    DisconnectBoot -> DeepSleep100;
+    DisconnectBoot -> DeepSleep100 [label="normal"];
+    DisconnectBoot -> PairingIdentifySkip [label="pairing_identify", style=dashed];
+    PairingIdentifySkip -> ActivePath [style=dashed];
+    DeepSleep100 -> ActivePath [label="DEEPSLEEP_RESET", style=dotted];
 
     // ==================================================================
-    // ACTIVEFSM (on EVERY wake from deep sleep)
+    // ACTIVEFSM (every deepsleep wake; also pairing-identify cold path)
     // ==================================================================
-    // orientation_check_frequency (default 18s) controls normal sleep.
-    // FACE_INDICATOR only on PIN_WAKE (rare for timer-driven wakes).
-    // For a stable (already tracking) face: start_tracking() early-returns.
-    //   → no extra LED await on steady cycles.
-    FaceIndicator [fillcolor="#ffccbc", label="FACE_INDICATOR\n(show faces / error)\nif PIN_WAKE (~7s blinks)"];
-    FaceDetect [fillcolor="#ef9a9a", label="FACE_DETECT\nnp_vcc.on + sensor_init + cube_face_upward()\n+ enable low-power DMP"];
+    // Start: FACE_INDICATOR.
+    //   - If settings.active is False → TRACKING_OFF (rapid red; sleep uses
+    //     upload_frequency, e.g. 300s). Checked again at FACE_CHECKED and
+    //     STOP_FACE_CHECK.
+    //   - Else → FACE_SETTLE (show_face_indicator first).
+    // FACE_INDICATOR LEDs (PIN_WAKE only): assigned-face map (~4s fade × 1 cycle;
+    //   README ~7s including effect). On classic PIN_WAKE + live dashboard hint,
+    //   warm radio (STA+TLS+GET config) runs in parallel with the map.
+    // FACE_SETTLE:
+    //   - Unwatched: one MPU sample, set face_obj, continue.
+    //   - Watched (hint_is_fresh): 5 Hz preview loop; solid LED on assigned face;
+    //     live_event POSTs; commit after SETTLE_STILL_MS (10s) still; give up at
+    //     SETTLE_TIMEOUT_S (40s) → clear preview, face_obj=None (FACE_DETECT then
+    //     takes one fresh sample).
+    // FACE_DETECT: reuse settle MPU; enable EXT0 wake + low-power DMP; error LEDs
+    //   for out_margin / low batt; triad blink on cutouts when newly selected.
+    // SoftAP (back_cutout): not an in-process 5 min loop anymore. Conditions:
+    //   SOFTAP_CAPTIVE_PORTAL_ENABLED + ap_mode_enabled + not pairing_identify +
+    //   orientation == SoftAP cutout + not APDON cooldown.
+    //   Action: finalize open sessions → request_ap_soft_reset_handoff (FBAP1) →
+    //   soft_reset → early SoftAP gate. If soft_reset fails, fall through to
+    //   UPLOAD_NEEDED (USB often present).
+    FaceIndicator [fillcolor="#ffccbc", label="FACE_INDICATOR\nmap LEDs if PIN_WAKE\n(+ warm radio if watched)"];
+    FaceSettle [fillcolor="#f8bbd9", label="FACE_SETTLE\nunwatched: 1 sample\nwatched: 5 Hz preview\n10s still / 40s timeout"];
+    FaceDetect [fillcolor="#ef9a9a", label="FACE_DETECT\ncommit face + EXT0\n+ enable low-power DMP"];
     FaceChecked [fillcolor="#f8bbd9", label="FACE_CHECKED"];
-    ApMode [fillcolor="#b39ddb", label="AP_MODE\n(back_cutout + enabled)\n5 min captive portal loop"];
-    StopFaceCheck [fillcolor="#ffab91", label="STOP_FACE_CHECK\nis_stop_face() ?"];
-    ActiveTracking [fillcolor="#a5d6a7", label="ACTIVE_TRACKING\nstart_tracking()\n(LED only on first flip)"];
-    StopTracking [fillcolor="#ef9a9a", label="STOP_TRACKING\naccumulating fib backoff\n(if stop face)\ntracker.stop_all()"];
-    DecideUpload [fillcolor="#fff59d", label="DECIDE_UPLOAD\n(batt/timer/log/stop/USB/PIN_WAKE)\nDEFAULT_UPLOAD_FRQ=300s"];
+    TrackingOff [fillcolor="#ffcdd2", label="TRACKING_OFF\nrapid red LED\nsleep = upload_frequency\nfinalize open sessions"];
+    ApMode [fillcolor="#b39ddb", label="AP_MODE\nfinalize + soft_reset\n(FBAP1 → SoftAP gate)"];
+    StopFaceCheck [fillcolor="#ffab91", label="STOP_FACE_CHECK\nUSB cutout / stop_face?"];
+    ActiveTracking [fillcolor="#a5d6a7", label="ACTIVE_TRACKING\ntracker.start_tracking()\n(clear preview + blink\n+ reset_backoff always)"];
+    StopTracking [fillcolor="#ef9a9a", label="STOP_TRACKING\napply_backoff + stop_all()\n(accumulating fib)"];
+    DecideUpload [fillcolor="#fff59d", label="decide_upload()\n→ UPLOAD_NEEDED flag"];
 
     ActivePath -> FaceIndicator;
-    FaceIndicator -> FaceDetect;
+    FaceIndicator -> TrackingOff [label="active == False"];
+    FaceIndicator -> FaceSettle [label="else\n(show_face_indicator)"];
+    FaceSettle -> FaceDetect [label="settle_face()"];
     FaceDetect -> FaceChecked;
-    FaceChecked -> ApMode [label="back_cutout + enabled"];
+    FaceChecked -> TrackingOff [label="active == False"];
+    FaceChecked -> ApMode [label="SoftAP cutout +\nenabled + no cooldown"];
     FaceChecked -> StopFaceCheck [label="else"];
-    ApMode -> DeepSleepActive [label="after 5min"];
+    ApMode -> SoftApSession [label="soft_reset success\n(early gate)", style=dashed];
+    ApMode -> DecideUpload [label="soft_reset failed\n→ still evaluate upload", style=dashed, color="red"];
+    StopFaceCheck -> TrackingOff [label="active == False"];
     StopFaceCheck -> ActiveTracking [label="not stop_face"];
     StopFaceCheck -> StopTracking [label="stop_face"];
     ActiveTracking -> DecideUpload;
     StopTracking -> DecideUpload;
+    TrackingOff -> DecideUpload;
 
     // ==================================================================
-    // UPLOADFSM (runs after Active on every wake)
+    // UPLOADFSM (runs after Active on every wake path)
     // ==================================================================
-    // Upload forced on: first time, elapsed >=300s, stop_face, has tracking_log,
-    // USB power, or PIN_WAKE.
-    // Successful upload → reset_backoff.
-    // Stop_face forces an upload on *every* cycle.
-    UploadNeeded [fillcolor="#fff59d", label="UPLOAD_NEEDED\n(active_result.need_upload)"];
-    DoUpload [fillcolor="#90caf9", label="UPLOAD_DATA\nwait_for_connection()\nrotate token + POST\n(+ weekly OTA check)"];
-    SkipUpload [fillcolor="#eeeeee", label="skip_upload()"];
-    PostUpload [fillcolor="#c5cae9", label="post_upload()\nreset_backoff()"];
-    Cleanup [fillcolor="#b0bec5", label="CLEANUP\ncancel LED tasks\nnp black + data low + np_vcc.off()\ntracker.save() + disconnect"];
-    DeepSleep [fillcolor="#90a4ae", label="DEEP_SLEEP\n(sleep_ms)\n18s normal (tracking)\naccumulating fib on stop:\n36s→54s→...→900s (15min)"];
+    // need_upload (ActiveFSM.decide_upload):
+    //   Tracking ON: upload_due (>= upload_frequency, default 300s) OR stop_face
+    //     OR non-empty tracking_log OR USB (> USB_VOLTAGE_THRESHOLD) OR PIN_WAKE.
+    //   Tracking OFF: has_log OR USB OR (upload_due AND not PIN_WAKE motion).
+    //     Motion pick while paused: blink already done; skip Wi-Fi unless due/log/USB.
+    // Upload path: wait_for_connection (or reuse warm STA) → NTP refresh → GET
+    //   config → weekly OTA check → POST tracking log (5s wait_for_ms cap).
+    // post_upload: reset_backoff only when NOT on a stop face.
+    // Both success and skip land on DISCONNECT → cleanup_and_sleep → deepsleep.
+    UploadNeeded [fillcolor="#fff59d", label="UPLOAD_NEEDED"];
+    DoUpload [fillcolor="#90caf9", label="UPLOAD_DATA\nSTA + NTP + GET config\n+ OTA check + POST log"];
+    SkipUpload [fillcolor="#eeeeee", label="skip_upload()\n(or upload fail/timeout)"];
+    PostUpload [fillcolor="#c5cae9", label="post_upload()\nreset_backoff if\nnot stop_face"];
+    DisconnectUpload [fillcolor="#b0bec5", label="DISCONNECT\ncancel LEDs + strip ephemeral\ntracker.save()\nprepare_for_deep_sleep()"];
+    DeepSleep [fillcolor="#90a4ae", label="DEEP_SLEEP\n18s normal (tracking)\nupload_frequency if paused\nfib backoff on stop:\n36s→54s→...→900s"];
 
     DecideUpload -> UploadNeeded;
     UploadNeeded -> DoUpload [label="need_upload"];
     UploadNeeded -> SkipUpload [label="else"];
-    SkipUpload -> Cleanup;
-    DoUpload -> PostUpload [label="success + connected"];
-    DoUpload -> Cleanup [label="timeout/fail"];
-    PostUpload -> Cleanup;
-    Cleanup -> DeepSleep;
+    SkipUpload -> DisconnectUpload;
+    DoUpload -> PostUpload [label="connected after upload"];
+    DoUpload -> SkipUpload [label="WiFi/upload fail"];
+    PostUpload -> DisconnectUpload;
+    DisconnectUpload -> DeepSleep;
 
-    // Wake sources (back edge)
-    DeepSleep -> ActivePath [label="Timer or PIN_WAKE\n(low power DMP IRQ)", style=dotted];
-
-    // ==================================================================
-    // SPECIAL / FAILURE PATHS
-    // ==================================================================
-    DeepSleepLong [fillcolor="#ffCDD2", label="Long sleep / reset\non WiFi or fatal errors"];
-    DeepSleepActive [fillcolor="#cfd8dc", label="DEEP_SLEEP\nfrom AP mode (after 5min)"];
+    // Wake sources (back edge into Active path after claimed deepsleep)
+    DeepSleep -> ActivePath [label="Timer or PIN_WAKE\n(low-power DMP IRQ)", style=dotted];
 
     // ==================================================================
-    // LEGEND + TIMING / POWER NOTES
+    // LEGEND + KEY TIMERS
     // ==================================================================
     subgraph cluster_legend {
         label="Legend + Key Timers";
@@ -117,77 +184,89 @@ digraph FlipBuddy_FSM {
         fontsize=9;
 
         leg_title   [label="Node colors:", shape=plaintext, fontsize=9];
-        leg_wifi    [label="WiFi / connect", fillcolor="#ffe0b2", shape=box];
+        leg_wifi    [label="WiFi / SoftAP / pairing", fillcolor="#ffe0b2", shape=box];
         leg_upload  [label="HTTP + token + OTA", fillcolor="#90caf9", shape=box];
-        leg_sleep   [label="deepsleep (accum. fib\nbackoff only on stop)", fillcolor="#90a4ae", shape=box];
+        leg_sleep   [label="deepsleep / handoff", fillcolor="#90a4ae", shape=box];
         leg_active  [label="Tracking active (LED)", fillcolor="#a5d6a7", shape=box];
-        leg_boot    [label="Cold boot only", fillcolor="#fff9c4", shape=box];
-        leg_note    [label="Configurable via remote:\norientation_check_frequency\nupload_frequency", fillcolor="#e1bee7", shape=box];
+        leg_boot    [label="Cold boot / offline boot", fillcolor="#fff9c4", shape=box];
+        leg_settle  [label="Settle / preview", fillcolor="#f8bbd9", shape=box];
+        leg_ap      [label="SoftAP handoff / portal", fillcolor="#b39ddb", shape=box];
+        leg_note    [label="Remote-configurable:\norientation_check_frequency\nupload_frequency\nactive / ap_mode_enabled\npairing_identify", fillcolor="#e1bee7", shape=box];
     }
 
     // ------------------------------------------------------------------
-    // TIME SPENT PER STATE + BACKOFF BEHAVIOR (updated for accumulating stop backoff)
+    // TIME SPENT PER STATE + BACKOFF BEHAVIOR (aligned with main.py / settings.py)
     // ------------------------------------------------------------------
-    // DEFAULT_SLEEP_TIME       = 18 s   (orientation_check_frequency, base for normal + fib)
-    // DEFAULT_UPLOAD_FRQ       = 300 s
-    // MAX_SLEEP_TIME           = 900 s  (15 min cap)
+    // DEFAULT_SLEEP_TIME       = 18 s   (orientation_check_frequency base)
+    // DEFAULT_UPLOAD_FRQ       = 300 s  (upload_frequency; also TRACKING_OFF sleep)
+    // MAX_SLEEP_TIME           = 900 s  (15 min fib cap)
+    // AP_DURATION_S            = 300 s  (claimed SoftAP portal)
+    // PAIR_DURATION_S          = 600 s  (unclaimed pairing SoftAP)
+    // SETTLE_STILL_MS          = 10000  (10 s still-hold while watched)
+    // SETTLE_HZ                = 5
+    // SETTLE_TIMEOUT_S         = 40
+    // DEFAULT_INDICATOR_BLINK  = 4000 ms × 1 cycle (PIN_WAKE assigned-face map)
+    // USB_VOLTAGE_THRESHOLD    = 4.3 V
     //
-    // fibonacci sequence (starting from base, n=1 after first apply):
+    // Fibonacci stop-face backoff (n=1 after first apply_backoff from base 18):
     //   36, 54, 90, 144, 234, 378, 612, 900 (capped)
+    // Counter lives in RTC memory across deep sleeps (shared namespace with SoftAP
+    // marks FBAP1/APDON — those prefixes are ignored by retrieve_last_backoff).
     //
-    // STOP FACE BACKOFF (option B - true accumulating):
-    //   - Every time we wake and are on a stop face: apply_backoff(base) increments the RTC counter.
-    //   - Counter is persisted in RTC memory across deep sleeps.
-    //   - reset_backoff() is ONLY called when we transition to an ACTIVE (non-stop) face
-    //     (in start_tracking) or on successful upload for non-stop faces.
-    //   - On stop faces: successful uploads still happen (because stop_face forces need_upload),
-    //     but they no longer reset the counter → sleep keeps growing.
-    //   - Result: while the cube stays on a stop face, sleep times grow:
-    //       36s → 54s → 90s → 144s → 234s → 378s → 612s → 900s (15 min)
-    //   - It only takes ~7-8 cycles (~30-40 min) to reach max backoff.
-    //   - Once at 900s, it stays there until a non-stop face is detected.
+    // STOP FACE BACKOFF (accumulating):
+    //   - Every wake on a stop face: apply_backoff(base) increments the RTC counter.
+    //   - reset_backoff() when start_tracking() begins a real activity face, or on
+    //     successful upload while NOT on a stop face. Leaving SoftAP cutout also
+    //     clears AP marks via clear_ap_cooldown() → reset_backoff.
+    //   - Stop faces still force need_upload (tracking on), but successful uploads
+    //     do not reset the counter → sleep keeps growing while parked on stop.
+    //   - Ramp: 36s → 54s → … → 900s (~7–8 cycles / ~30–40 min to max).
     //
-    // Per-state approximate durations (updated with real measurement):
-    //   FACE_INDICATOR (PIN_WAKE only) : 7-12 s
-    //   FACE_DETECT                    : 2-3.5 s (sensor_init every wake)
-    //   ACTIVE_TRACKING (new face)     : +2.0 s (initial blink await)
-    //   ACTIVE_TRACKING (stable face)  : ~0 s   (early return)
-    //   STOP_TRACKING + apply_backoff  : 1-2 s
-    //   UPLOAD_DATA (when executed)    : max 4 s (including WiFi connection)
-    //   CLEANUP + prepare_for_deep_sleep : 1-2 s
+    // SoftAP cooldown (APDON):
+    //   - Early SoftAP gate writes APDON before portal; ActiveFSM will not re-enter
+    //     AP_MODE while still on SoftAP cutout. Leaving that cutout clears cooldown.
     //
-    // Overall cycle estimates (no AP mode):
+    // Per-state approximate durations:
+    //   FACE_INDICATOR (PIN_WAKE map)   : ~4–7 s (plus optional warm-radio leftover)
+    //   FACE_INDICATOR (timer wake)     : ~0 s (no map)
+    //   FACE_SETTLE (unwatched)         : one sample (~instant after sensor_init)
+    //   FACE_SETTLE (watched commit)    : up to 10 s still (+ up to 40 s fidget budget)
+    //   FACE_DETECT                     : ~0.1–2 s (reuse settle MPU when present)
+    //   ACTIVE_TRACKING (new face)      : open session + blink await (~2 cycles)
+    //   ACTIVE_TRACKING (same face)     : tracker.start_tracking early-returns if
+    //                                    already tracking; ActiveFSM still clears
+    //                                    preview, awaits blink, reset_backoff()
+    //   TRACKING_OFF                    : rapid red + sleep = upload_frequency
+    //   AP_MODE → SoftAP session        : soft_reset + ~5 min portal (separate process)
+    //   UPLOAD_DATA                     : WiFi + POST; wait_for_ms 5 s on push
+    //   DISCONNECT + prepare_for_deep_sleep : 1–2 s
+    //
+    // Overall cycle estimates (no SoftAP, tracking on, unwatched timer wake):
     //   Steady tracking (stable non-stop face):
-    //       awake ≈ 3.8 s  +  sleep 18 s   → ~21.8 s cycle   | duty ~17.4%
-    //   Continuous stop face - early (ramping):
-    //       ~7 s awake + 36 s sleep
-    //   Continuous stop face - long term (at 900 s):
-    //       ~7 s awake + 900 s sleep → ~907 s cycle   | duty ~0.8%
+    //       awake ≈ few seconds + sleep 18 s
+    //   Continuous stop face - long term (900 s sleep + upload each cycle):
+    //       low duty (~0.8% class) — see README battery table
     //
-    // Power model:
+    // Power model (same assumptions as README / prepare_for_deep_sleep):
     //   Awake: ~40 mA
-    //   Deep sleep (after full prepare sequence): ~0.5 mA
+    //   Deep sleep (full prepare sequence): ~0.5 mA
     //   Battery: 550 mAh
     //
-    // Battery life estimates (24/7, long-running, 550 mAh):
-    //   1. 100% continuous tracking (stable face, ~18 s cycles + uploads every 5 min):
-    //        avg current ≈ 7.4 mA  → ~75 hours  (~3.1 days)
+    // Battery life estimates (24/7, 550 mAh) — order of magnitude:
+    //   1. Continuous tracking (~18 s cycles + uploads every 5 min):
+    //        ~7.4 mA → ~75 h (~3.1 days)
+    //   2. Continuous stop face at 900 s backoff:
+    //        ~0.8 mA → ~683 h (~28.5 days)
+    //   3. Typical ~10 h tracking / day:
+    //        ~3.5 mA → ~155 h (~6.5 days)
     //
-    //   2. 100% continuous stop face (accumulating backoff):
-    //        - Ramping phase (first ~8 cycles / ~30-40 min): sleep grows 36s→54s→...→900s
-    //        - Long-term steady state (15 min sleeps + upload ~every 15 min):
-    //          avg current ≈ 0.8 mA  → ~683 hours  (~28.5 days)
-    //
-    //   3. Typical 10 h tracking per day:
-    //        10 h in tracking mode (~7.4 mA) + 14 h in stop/idle (ramps quickly to very low draw).
-    //        Effective average: ≈ 3.5 mA overall → ~155 hours (~6.5 days)
-    //
-    // Full table also recorded in README.md.
+    // Full table: README.md § Battery. Sequence detail: prepare_for_deep_sleep().
     //
     // Notes:
-    // - The accumulating backoff makes leaving the cube on a stop face very power efficient.
-    // - Uploads still occur on stop faces (to report stop/clear logs), but at decreasing frequency.
-    // - Reset to normal 18 s base happens automatically on any non-stop activity face.
-    // - All numbers assume the prepare_for_deep_sleep() sequence (np_vcc gating, DATA low, low-power MPU).
+    // - Offline-first BootFSM: no WiFi reboot loop; NVS/default faces still track.
+    // - Live preview needs sane RTC + fresh live_ok_until (dashboard watching).
+    // - Accumulating stop backoff makes parking on stop very power efficient.
+    // - All deepsleep numbers assume prepare_for_deep_sleep() (np_vcc off, DATA low,
+    //   low-power MPU / EXT0 when configured).
     // ------------------------------------------------------------------
 }
