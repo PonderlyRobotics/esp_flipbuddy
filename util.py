@@ -113,7 +113,7 @@ def read_battery_voltage(
     # TODO:Find a better way to do it right, this is band-aid for now
     diode_compensation: float = 0.5,  # BAT60B typical drop 0.28 + measured drop 0.22
     cutoff_voltage: float = 3.30,
-    capacity_mah: int = 550,
+    capacity_mah: int = 600,
     samples: int = 10,
 ):
     """

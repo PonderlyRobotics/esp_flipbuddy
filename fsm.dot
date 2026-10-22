@@ -250,9 +250,9 @@ digraph FlipBuddy_FSM {
     // Power model (same assumptions as README / prepare_for_deep_sleep):
     //   Awake: ~40 mA
     //   Deep sleep (full prepare sequence): ~0.5 mA
-    //   Battery: 550 mAh
+    //   Battery: 600 mAh
     //
-    // Battery life estimates (24/7, 550 mAh) — order of magnitude:
+    // Battery life estimates (24/7, 600 mAh), order of magnitude:
     //   1. Continuous tracking (~18 s cycles + uploads every 5 min):
     //        ~7.4 mA → ~75 h (~3.1 days)
     //   2. Continuous stop face at 900 s backoff:

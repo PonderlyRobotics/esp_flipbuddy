@@ -236,7 +236,7 @@ Yellow stays on after the portal LED self-test as well, so you can still see “
 
 ## Battery (rough)
 
-With a ~550 mAh LiPo, order-of-magnitude only:
+With a ~600 mAh LiPo, order-of-magnitude only:
 
 | Scenario | Avg current | Est. life |
 |----------|-------------|-----------|
@@ -436,7 +436,7 @@ Full list with notes: assembly PDF → **Bill of Materials**.
 |----------|------|----:|
 | MCU | ESP32-S3 Supermini, USB-C, onboard charger preferred | 1 |
 | IMU | MPU6050 / GY-521 | 1 |
-| Battery | 3.7 V protected LiPo ~550 mAh | 1 |
+| Battery | 3.7 V protected LiPo ~600 mAh | 1 |
 | LEDs | WS2812B 5050 | 6 |
 | Optional ADC divider | 470 kΩ | 2 |
 
