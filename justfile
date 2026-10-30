@@ -4,8 +4,8 @@
 #
 # Typical user flow (Super Mini fast track):
 #   1. Download frozen .bin from GitHub Releases + verify .sha256
-#   2. just flash-firmware esp32_s3_flipbuddy_0.2.2-ota.bin
-#   3. just fast-track   # main.py + settings.py + ap_psk, then hard reset (does NOT upload credentials.json)
+#   2. just flash-firmware esp32_s3_flipbuddy_0.2.3-ota.bin
+#   3. just fast-track   # main.py + settings.py + off_check.py + ap_psk, then hard reset (does NOT upload credentials.json)
 #   4. Join FlipBuddy-XXXX with the printed password.
 # DIY (stock MicroPython): just flash-firmware <stock.bin> && just diy
 # JSON recovery (advanced): just put-credentials
@@ -26,10 +26,10 @@ esp_chip := "s3"                             # esptool --chip esp32{{ esp_chip }
 esp_flash_size := "4MB"                      # document your module flash; shown by `just env`
 
 # Firmware modules for the ESP only (not host tools: test_fsm.py, clean_frozen.py, scripts/)
-device_py := "main.py settings.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
+device_py := "main.py settings.py off_check.py ap_session.py models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py pairing.py pairing_portal.py"
 # AST-stripped modules written by `just clean-frozen` (no main.py / settings.py — LittleFS overlay)
 cleaned_dir := "/tmp/flipbuddy_cleaned"
-cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py pairing.py pairing_portal.py"
+cleaned_py := "models.py mpu6050.py rgb.py http.py network_helper.py credentials.py util.py ap_mode.py ap_session.py pairing.py pairing_portal.py off_check.py boot.py"
 
 # stderr spinner while a quiet command runs (mpremote cp/exec/reset).
 wait_spin := '''
@@ -97,11 +97,11 @@ reset-state:
     -mpremote connect {{ usb_dev }} rm :startup_config.json
     @echo "Runtime state files removed from device (ignore errors if missing)."
 
-# Upload main.py + settings.py (frozen image path — LittleFS overlay; do not mass-upload other modules)
+# Upload main.py + settings.py + off_check.py (frozen image path — LittleFS overlay; do not mass-upload other modules)
 [group("Device")]
 put-main:
-    @mpremote connect {{ usb_dev }} cp main.py settings.py : >/dev/null
-    @echo "uploaded main.py settings.py"
+    @mpremote connect {{ usb_dev }} cp main.py settings.py off_check.py : >/dev/null
+    @echo "uploaded main.py settings.py off_check.py"
 
 # Print a random SoftAP join password (does not talk to the cube).
 # MicroPython will not invent ap_psk at boot. Write this down, then just put-ap-psk.
@@ -174,7 +174,7 @@ put-api-url api_url:
     echo "api $url"
 
 # Fast track FS deploy after flashing the frozen Release .bin.
-# main.py + settings.py + SoftAP join password. Does **not** upload credentials.json.
+# main.py + settings.py + off_check.py + SoftAP join password. Does **not** upload credentials.json.
 # Optional https API base: just fast-track https://api.flipbuddy.app/v1/api/
 [group("Device")]
 fast-track api_url=env("FLIPBUDDY_API_URL", ""):
@@ -183,7 +183,7 @@ fast-track api_url=env("FLIPBUDDY_API_URL", ""):
     {{ wait_spin }}
     port="{{ usb_dev }}"
     echo "→ fast-track $port"
-    wait_spin mpremote connect "$port" cp main.py settings.py :
+    wait_spin mpremote connect "$port" cp main.py settings.py off_check.py :
     python3 scripts/gen_ap_psk.py --ensure --quiet
     just put-ap-psk
     if [[ -n "{{ api_url }}" ]]; then
@@ -228,7 +228,7 @@ pull-nvs-state out=".":
 
 # Full erase + flash a firmware .bin (download frozen images from GitHub Releases first)
 [group("Device")]
-flash-firmware firmware="esp32_s3_flipbuddy_0.2.2-ota.bin":
+flash-firmware firmware="esp32_s3_flipbuddy_0.2.3-ota.bin":
     #!/usr/bin/env bash
     set -euo pipefail
     # USB images only: *-ota.bin (preferred) or factory .bin. Looks in cwd, then build/.
@@ -289,6 +289,8 @@ upload-clean:
     mpremote connect {{ usb_dev }} cp main.py :
     echo "   + settings.py (repo source, not stripped)"
     mpremote connect {{ usb_dev }} cp settings.py :
+    echo "   + off_check.py (repo source, not stripped)"
+    mpremote connect {{ usb_dev }} cp off_check.py :
     echo "Upload complete. Reset the ESP32 to run the new code."
 
 # =============================================================================
@@ -339,19 +341,19 @@ release-check:
     @echo "✓ release-check passed. Review any warnings above before publishing."
 
 # Hash USB frozen images for GitHub Releases (writes .sha256 + SHA256SUMS; does not upload).
-# Default: v0.2.2 factory + dual-OTA USB bins under build/. Does not hash app-slot OTA files.
+# Default: v0.2.3 factory + dual-OTA USB bins under build/. Does not hash app-slot OTA files.
 #   just release-assets
-#   just release-assets build/esp32_s3_flipbuddy_0.2.2-ota.bin v0.2.2
+#   just release-assets build/esp32_s3_flipbuddy_0.2.3-ota.bin v0.2.3
 [group("Utils")]
-release-assets firmware="" tag="v0.2.2":
+release-assets firmware="" tag="v0.2.3":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -n "{{ firmware }}" ]]; then
       bins=("{{ firmware }}")
     else
       bins=(
-        build/esp32_s3_flipbuddy_0.2.2.bin
-        build/esp32_s3_flipbuddy_0.2.2-ota.bin
+        build/esp32_s3_flipbuddy_0.2.3.bin
+        build/esp32_s3_flipbuddy_0.2.3-ota.bin
       )
     fi
     for f in "${bins[@]}"; do
@@ -380,9 +382,9 @@ release-assets firmware="" tag="v0.2.2":
 # Create GitHub Release + upload USB .bin files and checksums (requires: gh auth login).
 # USB images only (factory + *-ota.bin). App-slot OTA stays on flipbuddy.app.
 #   just release-publish
-#   just release-publish v0.2.2
+#   just release-publish v0.2.3
 [group("Utils")]
-release-publish tag="v0.2.2":
+release-publish tag="v0.2.3":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v gh >/dev/null || { echo "gh CLI not found. Install GitHub CLI and run: gh auth login"; exit 1; }

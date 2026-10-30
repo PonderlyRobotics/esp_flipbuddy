@@ -89,6 +89,7 @@ from machine import (
     reset_cause,
     wake_reason,
 )
+from off_check import coerce_check_s, mpu_motion, sleep_seconds
 from models import BaseFSM, Config, Tracker, Transition, to_serializable
 from mpu6050 import cube_face_upward, sample_face_accel, sensor_init
 from network_helper import (
@@ -118,6 +119,7 @@ from settings import (
     NP_DATA_PIN,
     NUM_LEDS,
     OTA_APP_MAX,
+    OTA_CHIP_ID,
     OTA_HOLD_COLOR,
     SETTLE_HZ,
     SETTLE_STILL_MS,
@@ -645,10 +647,11 @@ async def prepare_for_deep_sleep(
             # supports it; timer wake still runs Mode A while hint is fresh.
             with suppress(Exception):
                 esp32.wake_on_ext0(pin=s._int_pin, level=esp32.WAKEUP_ANY_HIGH)
+            thr, div = mpu_motion(None)
             if hasattr(s, "configure_for_deep_sleep"):
-                s.configure_for_deep_sleep()
+                s.configure_for_deep_sleep(threshold=thr, sample_rate_div=div)
             else:
-                s.enable_low_power_dmp_motion_detection(threshold=2, sample_rate_div=16)
+                s.enable_low_power_dmp_motion_detection(threshold=thr, sample_rate_div=div)
             dprint("MPU configured for low-power DMP motion detection (deep sleep)")
         except Exception as e:
             dprint("MPU deep-sleep config warning (non-fatal):", e)
@@ -697,15 +700,17 @@ def _ota_addr_ok(addr):
 
 
 def ota_header_is_app(head):
-    """App image (not bootloader / merged USB). Frozen pairing.py may lack this helper."""
+    """App image for this chip. A foreign chip or a merged USB image is refused."""
     try:
-        from pairing import ota_header_is_app as _chk
+        from pairing import ota_header_for_this_chip
 
-        return _chk(head)
+        return ota_header_for_this_chip(head, OTA_CHIP_ID)
     except (ImportError, AttributeError):
-        if not head or len(head) < 2:
+        if not head or len(head) < 14:
             return False
-        return head[0] == 0xE9 and head[1] >= 5
+        if head[0] != 0xE9 or head[1] < 5:
+            return False
+        return (head[12] | (head[13] << 8)) == OTA_CHIP_ID
 
 
 async def _ota_hold_leds(tracker_obj):
@@ -832,11 +837,11 @@ async def _ota_stream_sha256(url, headers, timeout=120, part=None, part_size=0):
         digest.update(data)
         n += len(data)
         acc += data
-        if header_ok is None and len(acc) >= 16:
+        if header_ok is None and len(acc) >= 14:
             header_ok = ota_header_is_app(acc)
             if not header_ok:
                 print(
-                    "OTA refuse: not an app image. Need *-ota-app.bin, not merged USB."
+                    "OTA refuse: not an app image for this chip. Need this product's *-ota-app.bin."
                 )
                 n = -1
                 acc = b""
@@ -975,6 +980,7 @@ async def ota_weekly_check(tracker_obj, config=None, remote=None):
                     "OTA bin ok (%s bytes). This image has no ota_1 slot; USB esptool to apply."
                     % n
                 )
+                return False
             else:
                 print("OTA wrote", n, "bytes to", lab)
                 try:
@@ -991,11 +997,6 @@ async def ota_weekly_check(tracker_obj, config=None, remote=None):
                 await asyncio.sleep(1)
                 reset()
                 return True
-            tracker_obj.running["ota_applied_version"] = version
-            tracker_obj.running["last_ota_check"] = time.time()
-            tracker_obj.apply(tracker_obj.running)
-            tracker_obj.save()
-            return True
         print("OTA kind %s not applied on frozen main.py-only image" % kind)
         return False
     except Exception as e:
@@ -1374,6 +1375,20 @@ class ActiveFSM(BaseFSM):
     def is_tracking_off(self):
         return self.config.running["settings"].get("active", True) is False
 
+    def _tracking_off_interval(self):
+        settings = self.config.running["settings"]
+        return coerce_check_s(
+            settings.get("tracking_off_check_s"),
+            settings.get("upload_frequency", DEFAULT_UPLOAD_FRQ),
+            DEFAULT_UPLOAD_FRQ,
+        )
+
+    def _set_tracking_off_sleep(self, motion):
+        last = self.tracker.running.get("last_config_uploaded", "")
+        elapsed = time.time() - str_to_epoch(last) if last else None
+        seconds = sleep_seconds(self._tracking_off_interval(), elapsed, motion)
+        self.sleep_ms = int(seconds) * 1000
+
     async def show_tracking_off_led(self):
         """Disabled cue: rapid red on upward face (triad if cutout). Finalize open session."""
         wdt_feed()
@@ -1386,11 +1401,9 @@ class ActiveFSM(BaseFSM):
             orient = self.face_obj.orientation if self.face_obj else None
             with suppress(Exception):
                 await self.tracker.finalize_and_persist(active_orientation=orient)
-        # Timer wake for config uses upload_frequency (e.g. 300s), not orientation 18s.
-        base = self.config.running["settings"].get(
-            "upload_frequency", DEFAULT_UPLOAD_FRQ
-        )
-        self.sleep_ms = int(base) * 1000
+        # Check-back uses tracking_off_check_s when set, else upload_frequency.
+        # A bump does not restart that deadline.
+        self._set_tracking_off_sleep(wake_reason() == PIN_WAKE)
         face_name = self.face_obj.orientation if self.face_obj else None
         if face_name is None:
             with suppress(Exception):
@@ -1789,17 +1802,22 @@ class ActiveFSM(BaseFSM):
         usb_connected = batt["adjusted_voltage_v"] > USB_VOLTAGE_THRESHOLD
         has_log = self.tracker.tracking_log_nonempty()
         last_upload = self.tracker.running.get("last_config_uploaded", "")
-        upload_freq = self.config.running["settings"].get(
-            "upload_frequency", DEFAULT_UPLOAD_FRQ
-        )
+        if self.is_tracking_off():
+            upload_freq = self._tracking_off_interval()
+        else:
+            upload_freq = self.config.running["settings"].get(
+                "upload_frequency", DEFAULT_UPLOAD_FRQ
+            )
         time_since_upload = (
             time.time() - str_to_epoch(last_upload) if last_upload else float("inf")
         )
         upload_due = last_upload == "" or time_since_upload >= upload_freq
         if self.is_tracking_off():
-            # Motion pick: blink already done; skip Wi-Fi. Config on timer / USB / log.
+            # A bump blinks and does not join Wi-Fi. A pending log radios when
+            # the check is already due, or on USB. Not on every bump.
             motion = wake_reason() == PIN_WAKE
-            need_upload = has_log or usb_connected or (upload_due and not motion)
+            need_upload = usb_connected or (upload_due and (has_log or not motion))
+            self._set_tracking_off_sleep(motion)
         else:
             need_upload = (
                 upload_due

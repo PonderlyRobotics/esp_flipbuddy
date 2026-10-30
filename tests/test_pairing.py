@@ -1,4 +1,4 @@
-"""Host tests for pairing helpers (v0.2.2)."""
+"""Host tests for pairing helpers (v0.2.3)."""
 
 import importlib.util
 import json
@@ -15,7 +15,7 @@ from settings import IDENTIFY_GREEN, OTA_APP_MAX
 
 
 def test_firmware_version():
-    assert pairing.FIRMWARE_VERSION == "0.2.2"
+    assert pairing.FIRMWARE_VERSION == "0.2.3"
 
 
 def test_claim_url_default_is_production_v1():
@@ -466,6 +466,13 @@ def test_ota_header_is_app_rejects_bootloader_and_merged():
     assert pairing.ota_header_is_app(b"\xff" * 16) is False
     assert pairing.ota_header_is_app(b"") is False
     assert pairing.ota_header_is_app(None) is False
+    s3 = bytearray(bytes([0xE9, 0x07, 0x02, 0x2F]) + b"\x00" * 16)
+    s3[12] = 9
+    c3 = bytearray(s3)
+    c3[12] = 5
+    assert pairing.ota_header_for_this_chip(bytes(s3), 9) is True
+    assert pairing.ota_header_for_this_chip(bytes(c3), 9) is False
+    assert pairing.ota_header_for_this_chip(bytes(s3[:4]), 9) is False
     assert OTA_APP_MAX == 1769472
     assert 1817552 > OTA_APP_MAX
     assert 1752016 < OTA_APP_MAX

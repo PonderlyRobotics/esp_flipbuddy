@@ -41,7 +41,7 @@ Everyday bugs, typos, and “please add this feature” belong in **public issue
 | Version | Support |
 |---------|---------|
 | **0.2.x** | Best effort (claim pairing + dual-OTA freeze) |
-| **0.1.x** (v0.1.0–v0.1.5) | Obsolete. Does not work with Production claim pairing or dual-OTA. USB-flash **0.2.2**. |
+| **0.1.x** (v0.1.0–v0.1.5) | Obsolete. Does not work with Production claim pairing or dual-OTA. USB-flash **0.2.3**. |
 | Older or untagged trees | No formal support |
 
 ## Credentials
@@ -92,13 +92,13 @@ These do not make SoftAP “secure against a motivated local attacker,” but th
 4. Treat a lost cube as a physical-security event: refresh dashboard credentials, rotate Wi‑Fi if you saved it on the cube, and assume status data on the portal was readable while SoftAP was up.
 5. Keep using USB `credentials.json` as the recovery path when SoftAP is wrong or unavailable.
 
-End‑user SoftAP steps (join AP, fix Wi‑Fi, clock recovery) live in the [README SoftAP section](./README.md#softap-maintenance-mode).
+End-user SoftAP steps (join AP, fix Wi-Fi, clock recovery) live in [Use the cube](./docs/USE.md#softap-maintenance-mode).
 
 Hobby firmware cannot fully stop physical theft, an unlocked session, or someone who already knows `device_id`. Report real escalations (e.g. remote trigger of SoftAP, token leak, unauthenticated Wi‑Fi write) via the private channels above.
 
 ## Firmware images
 
-Prefer Release assets that ship with SHA-256 checksums. GitHub Releases attach **USB** images only (`*-ota.bin` and the factory `.bin`). App-slot OTA packages are not public Release files. Frozen images also contain MicroPython and other third-party code; see [docs/NOTICE](./NOTICE). Supported freeze is **0.2.x**; **0.1.x** does not work with Production claim pairing or dual-OTA.
+Prefer Release assets that ship with SHA-256 checksums. GitHub Releases attach **USB** images only (`*-ota.bin` and the factory `.bin`). App-slot OTA packages are not public Release files. Frozen images also contain MicroPython and other third-party code; see [docs/NOTICE](./docs/NOTICE). Supported freeze is **0.2.x**; **0.1.x** does not work with Production claim pairing or dual-OTA.
 
 ## Scope
 

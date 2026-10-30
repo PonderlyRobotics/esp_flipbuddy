@@ -2,6 +2,16 @@
 
 Versions follow `pyproject.toml` and the GitHub Release tags (firmware / source tree).
 
+## 0.2.3 (2026-10-30)
+
+Super Mini freeze on the same claim pairing + dual-OTA table as **0.2.2**. Flash **`esp32_s3_flipbuddy_0.2.3-ota.bin`**. See [RELEASE_NOTES_v0.2.3.md](./RELEASE_NOTES_v0.2.3.md). `off_check.py` is frozen and `just fast-track` copies it with `main.py` and `settings.py`.
+
+- Pause tracking check-back: 5 min, 30 min, or 2 h when `tracking_off_check_s` is one of those. Otherwise the usual upload interval (default 300 s)
+- A pickup blinks rapid red and does not restart that deadline. It does not join Wi-Fi
+- A saved log is sent when the check is already due, or while USB is plugged in. Not on every bump
+
+Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.3-ota.bin` (preferred USB), `esp32_s3_flipbuddy_0.2.3.bin` (factory table). App-slot OTA files stay on flipbuddy.app; they are not GitHub assets.
+
 ## 0.2.2 (2026-09-04)
 
 Super Mini freeze on the same claim pairing + dual-OTA table as **0.2.1**. Flash **`esp32_s3_flipbuddy_0.2.2-ota.bin`**. See [RELEASE_NOTES_v0.2.2.md](./RELEASE_NOTES_v0.2.2.md). Fast-track on a 0.2.1 USB image is not enough (`http.py`, `rgb.py`, `pairing_portal.py`, `credentials.py` are frozen).
@@ -50,7 +60,7 @@ Frozen GitHub Release images: `esp32_s3_flipbuddy_0.2.0-ota.bin` (preferred USB)
 
 ## 0.1.5 (2026-08-29)
 
-**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.2**.
+**Superseded.** This factory-table image does **not** work with Production claim pairing or dual-OTA. New Super Mini flashes: **0.2.3**.
 
 Firmware **0.1.5** on **MicroPython 1.28**. Super Mini hardware is still MPU6050 + ADC.
 

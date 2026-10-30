@@ -32,6 +32,18 @@ def ota_header_is_app(head):
     return head[0] == ESP_IMAGE_MAGIC and head[1] >= OTA_MIN_APP_SEGMENTS
 
 
+def ota_header_for_this_chip(head, chip_id):
+    """App image whose header chip id is this product. Short headers fail closed."""
+    if not ota_header_is_app(head) or not head or len(head) < 14:
+        return False
+    try:
+        want = int(chip_id)
+    except (TypeError, ValueError):
+        return False
+    got = head[12] | (head[13] << 8)
+    return got == want
+
+
 def normalize_pairing_code(raw):
     """Uppercase, drop hyphens/spaces; None if not 8 alphabet chars."""
     out = []

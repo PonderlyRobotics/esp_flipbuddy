@@ -2,13 +2,13 @@
 
 Thanks for caring enough to open this file.
 
-The [README](./README.md) is for people building a cube. This page is for people who want to change firmware, docs, or the little host tools around them. I work on FlipBuddy in the evenings under Ponderly Robotics, so reviews may take a while. That is fine. Careful patches are still welcome.
+The [README](./README.md) is the short start. [docs/BUILD.md](./docs/BUILD.md) is the full build. This page is for people who want to change firmware, docs, or the little host tools around them. I work on FlipBuddy in the evenings under Ponderly Robotics, so reviews may take a while. That is fine. Careful patches are still welcome.
 
 ## Where to look
 
 | Role | Start here |
 |------|------------|
-| Building a cube | [README.md](./README.md) |
+| Building a cube | [README.md](./README.md), then [docs/BUILD.md](./docs/BUILD.md) |
 | Contributing code or docs | This file |
 | Shipping a frozen `.bin` | [Publishing frozen firmware](#publishing-frozen-firmware) |
 | Licenses | [LICENSE](./LICENSE), [LICENSE-HARDWARE](./LICENSE-HARDWARE) |
@@ -55,7 +55,7 @@ After `uv sync`, recipes prefer `.venv` for `python` / `ruff` / `pytest` (same i
 | `just diy` | `upload` + PSK (full sources on stock MP; does **not** copy JSON) |
 | `just upload` | Copy firmware modules (`device_py`) to the device |
 | `just pull-nvs-state` | Dump config/tracker from NVS to local JSON |
-| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.2-ota.bin`) |
+| `just flash-firmware` | Erase and flash a USB `.bin` (default `esp32_s3_flipbuddy_0.2.3-ota.bin`) |
 | `just shell` | Serial console |
 | `just test` | Host tests (`tests/` + `test_fsm.py` via pytest) |
 | `just check` / `just fix` / `just fmt` | Lint / format (ruff) |
@@ -127,12 +127,12 @@ Please do not commit real credentials, `.env` files, private keys, absolute home
 
 We keep Super Mini images out of git and put **USB** images on GitHub Releases with checksums.
 
-v0.2.2 ships two USB files:
+v0.2.3 ships two USB files:
 
 | Asset | Flash with `write-flash 0` |
 |-------|----------------------------|
-| `esp32_s3_flipbuddy_0.2.2-ota.bin` | Yes. Dual-OTA table. Prefer this. |
-| `esp32_s3_flipbuddy_0.2.2.bin` | Yes. Factory table (no self-OTA). |
+| `esp32_s3_flipbuddy_0.2.3-ota.bin` | Yes. Dual-OTA table. Prefer this. |
+| `esp32_s3_flipbuddy_0.2.3.bin` | Yes. Factory table (no self-OTA). |
 
 Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.app OTA. USB-flashing it is wrong (`ESP_ERR_OTA_VALIDATE_FAILED` if it later gets OTA'd as a merged dump; a raw app blob at offset 0 is not a bootable USB image).
 
@@ -144,12 +144,12 @@ Do **not** attach `*-ota-app.bin`. That is the app-slot payload for flipbuddy.ap
 
    ```bash
    just release-assets
-   # or: just release-assets build/esp32_s3_flipbuddy_0.2.2-ota.bin v0.2.2
+   # or: just release-assets build/esp32_s3_flipbuddy_0.2.3-ota.bin v0.2.3
    ```
 
-4. Tag that commit (`mise run release-tag -- v0.2.2` or `git tag -a v0.2.2`) and push the tag when you mean to publish.
+4. Tag that commit (`mise run release-tag -- v0.2.3` or `git tag -a v0.2.3`) and push the tag when you mean to publish.
 
-5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.2.md](./docs/RELEASE_NOTES_v0.2.2.md).
+5. Create the GitHub Release (`just release-publish` or `gh release create`) and attach the two USB `.bin` files plus checksums. Notes body: [docs/RELEASE_NOTES_v0.2.3.md](./docs/RELEASE_NOTES_v0.2.3.md).
 
 6. If the README still names an old image, update it. **v0.1.x** tags do not work with Production claim pairing or dual-OTA.
 
@@ -158,8 +158,8 @@ Never `git add` the `.bin`. Partition CSV for the dual-OTA table: [partitions/pa
 To flash after download:
 
 ```bash
-sha256sum -c esp32_s3_flipbuddy_0.2.2-ota.bin.sha256
-just flash-firmware esp32_s3_flipbuddy_0.2.2-ota.bin
+sha256sum -c esp32_s3_flipbuddy_0.2.3-ota.bin.sha256
+just flash-firmware esp32_s3_flipbuddy_0.2.3-ota.bin
 ```
 
 ## Tests
@@ -191,12 +191,12 @@ No hardware required. Prefer `uv sync` first so `.venv` has pytest and ruff.
 | Wi-Fi STA / SoftAP helpers | `network_helper.py` |
 | Credentials / NVS / SoftAP PIN | `credentials.py` |
 | Power diagram | `fsm.dot` |
-| SoftAP end-user steps / risks | [README SoftAP](./README.md#softap-maintenance-mode), [SECURITY SoftAP](./SECURITY.md#softap-captive-portal-http-pin-wi-fi) |
+| SoftAP end-user steps / risks | [Use the cube](./docs/USE.md#softap-maintenance-mode), [SECURITY SoftAP](./SECURITY.md#softap-captive-portal-http-pin-wi-fi) |
 | Host SoftAP / credential tests | `tests/` |
 
-SoftAP **builder** steps live in the README; this file is for portal / PIN / handoff **code** changes.
+SoftAP **builder** steps live in [docs/USE.md](./docs/USE.md#softap-maintenance-mode); this file is for portal / PIN / handoff **code** changes.
 
-Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. SoftAP cutout (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). USB-C port (`front_cutout`) is the stop face. For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py`); for DIY full sources use `just diy` / `just upload`.
+Usual life cycle: Boot (Wi-Fi, NTP, config), a short sleep, then Active and Upload when waking from deep sleep. SoftAP cutout (`back_cutout`) soft-resets into SoftAP via the early gate in `main.py` (no `boot.py`). USB-C port (`front_cutout`) is the stop face. For small behavior changes on a frozen image, prefer `just put-main` (`main.py` + `settings.py` + `off_check.py`); for DIY full sources use `just diy` / `just upload`.
 
 Pins: search `settings.py` for `NP_DATA_PIN`, `LED_PINOUT`, and the neighboring constants.
 

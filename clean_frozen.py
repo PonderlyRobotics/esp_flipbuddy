@@ -126,11 +126,14 @@ def main():
         "credentials.py",
         "pairing.py",
         "pairing_portal.py",
+        "off_check.py",
+        "boot.py",
     ]
     for f in files:
         src = src_dir / f
         if not src.exists():
-            continue
+            print("missing freeze input", f)
+            sys.exit(1)
         dest = dest_dir / f
         clean_file(src, dest)
     orig_size = sum(

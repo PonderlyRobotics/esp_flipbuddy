@@ -5,7 +5,7 @@ from micropython import const
 # --- Identity ---  Super Mini overlay; do not copy another board's pin numbers.
 HW_FAMILY = "supermini"
 CHIP = "s3"
-FIRMWARE_VERSION = "0.2.2"
+FIRMWARE_VERSION = "0.2.3"
 
 # --- CPU / debug ---
 CPU_FREQ_HZ = const(240000000)
@@ -27,7 +27,7 @@ USB_VOLTAGE_THRESHOLD = const(4.3)
 BATTERY_FULL_V = const(4.2)
 BATTERY_CUTOFF_V = const(2.8)
 BATTERY_NOMINAL_V = const(3.7)
-DEFAULT_BAT_CAPACITY = const(550)
+DEFAULT_BAT_CAPACITY = const(600)
 
 # --- Product timings ---
 DEFAULT_SLEEP_TIME = const(18)  # seconds
@@ -55,6 +55,8 @@ OTA_HOLD_COLOR = "#FFFFFF"
 OTA_ALLOWED_HOSTS = ("api.flipbuddy.app", "raw.githubusercontent.com")
 OTA_MIN_APP_SEGMENTS = 5
 ESP_IMAGE_MAGIC = 0xE9
+# ESP image header chip id (esp_chip_id_t). Refuse another product's app slot.
+OTA_CHIP_ID = 9
 
 # --- API / credentials ---  Cloud URL allowlist, NVS keys, and host SoftAP PSK alphabet.
 PAIRING_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"

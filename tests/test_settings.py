@@ -168,11 +168,11 @@ def test_supermini_pin_map():
     assert settings.BATTERY_FULL_V == 4.2
     assert settings.BATTERY_CUTOFF_V == 2.8
     assert settings.BATTERY_NOMINAL_V == 3.7
-    assert settings.DEFAULT_BAT_CAPACITY == 550
+    assert settings.DEFAULT_BAT_CAPACITY == 600
     assert settings.CPU_FREQ_HZ == 240000000
     assert settings.DEBUG is False
     assert settings.SETTLE_STILL_MS == 10000
-    assert settings.FIRMWARE_VERSION == "0.2.2"
+    assert settings.FIRMWARE_VERSION == "0.2.3"
     assert settings.DEFAULT_INDICATOR_BLINK_DURATION == 4000
     assert settings.LIVE_EVENT_MAX_PER_WAKE == 30
     assert settings.PREVIEW_HTTP_MS == 2000
@@ -414,16 +414,25 @@ def test_settings_is_littlefs_not_frozen():
     device_py = _just_list(just, "device_py")
     cleaned_py = _just_list(just, "cleaned_py")
     assert "settings.py" in device_py
+    assert "off_check.py" in device_py
     assert "settings.py" not in cleaned_py
+    assert "off_check.py" in cleaned_py
+    assert "boot.py" in cleaned_py
+    assert "main.py" not in cleaned_py
     assert "hw_config.py" not in device_py
     assert "hw_config.py" not in cleaned_py
 
     freeze_files = re.findall(r'"([a-z0-9_]+\.py)"', _read("clean_frozen.py"))
     assert "settings.py" not in freeze_files
+    assert "off_check.py" in freeze_files
+    assert "boot.py" in freeze_files
+    assert "main.py" not in freeze_files
     assert "hw_config.py" not in freeze_files
 
     fast = just[just.find("fast-track api_url") : just.find("diy api_url")]
     assert "settings.py" in fast
+    assert "off_check.py" in fast
+    assert "boot.py" not in fast
     assert "hw_config.py" not in fast
     diy = just[just.find("diy api_url") : just.find("pull-nvs-state")]
     assert "device_py" in diy or "settings.py" in diy
@@ -431,7 +440,7 @@ def test_settings_is_littlefs_not_frozen():
     put_main = just[just.find("\nput-main:") : just.find("gen-ap-psk")]
     assert "settings.py" in put_main
     assert "hw_config.py" not in put_main
-    assert "cp main.py settings.py :" in put_main
+    assert "cp main.py settings.py off_check.py :" in put_main
 
 
 def test_hw_config_py_is_gone():
